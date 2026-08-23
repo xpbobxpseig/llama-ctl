@@ -29,6 +29,7 @@ from nssm_adapter import (
     get_start_mode, set_start_mode, sc_query_state, sc_action,
     list_nssm_services, check_health,
 )
+from params import parse_params, build_params
 
 # ---------------------------------------------------------------------------
 # 配置（本机固定事实）
@@ -281,145 +282,6 @@ for _f in FIELDS:
 
 
 
-# ---------------------------------------------------------------------------
-# 参数解析 / 重建
-# ---------------------------------------------------------------------------
-def split_args(text):
-    """按空格切分参数，正确处理双引号包裹（支持 \\" 转义）。
-
-    不用 shlex：shlex posix=False 不处理引号（含空格 JSON 会崩），
-    posix=True 又会把 Windows 路径的 \\ 当转义。自研切分兼顾两者。
-    """
-    out, i, n = [], 0, len(text or "")
-    while i < n:
-        c = text[i]
-        if c.isspace():
-            i += 1
-            continue
-        if c == '"':
-            j, buf = i + 1, ""
-            while j < n:
-                if text[j] == "\\" and j + 1 < n:
-                    buf += text[j + 1]
-                    j += 2
-                    continue
-                if text[j] == '"':
-                    break
-                buf += text[j]
-                j += 1
-            out.append(buf)
-            i = j + 1
-        else:
-            j = i
-            while j < n and not text[j].isspace():
-                j += 1
-            out.append(text[i:j])
-            i = j
-    return out
-
-
-def parse_params(text):
-    """解析 NSSM AppParameters 为 (values: dict, extras: list, warnings: list)。
-
-    -c 与 --ctx-size 冲突：保留最后一项并告警；滑块型数值缺失则取 default。
-    check 型（如 --no-mmap）无值，记为值 "1"。
-    """
-    values = {f["key"]: "" for f in FIELDS}
-    extras = []
-    warnings = []
-    tokens = split_args(text) if text else []
-    i, n = 0, len(tokens)
-    ctx_seen = []
-    while i < n:
-        tok = tokens[i]
-        if tok in ALIAS_TO_KEY:
-            key = ALIAS_TO_KEY[tok]
-            fld = next(f for f in FIELDS if f["key"] == key)
-            if fld["kind"] == "check":
-                values[key] = "1"
-                i += 1
-                continue
-            if i + 1 < n and not tokens[i + 1].startswith("-"):
-                val = tokens[i + 1]
-                i += 2
-            else:
-                val = ""
-                i += 1
-            if key == "ctx_size":
-                ctx_seen.append(val)
-            values[key] = val
-        else:
-            extras.append(tok)
-            i += 1
-    # 滑块默认值回填（解析到的若为空或越界则用 default）；整数 step 字段规范化去 .0
-    for fld in FIELDS:
-        if fld["kind"] == "slider":
-            v = values[fld["key"]].strip()
-            int_step = float(fld["step"]).is_integer()
-            if v == "" or not _is_number(v):
-                dflt = fld.get("default", fld["min"])
-                values[fld["key"]] = str(int(dflt)) if int_step else str(dflt)
-            else:
-                num = float(v)
-                lo, hi = fld["min"], fld["max"]
-                if num < lo or num > hi:
-                    warnings.append(f"{fld['label']} 值 {v} 超出范围[{lo},{hi}]，已回退默认。")
-                    dflt = fld.get("default", lo)
-                    values[fld["key"]] = str(int(dflt)) if int_step else str(dflt)
-                else:
-                    values[fld["key"]] = str(int(num)) if int_step else str(num)
-    if len(ctx_seen) > 1:
-        warnings.append(
-            f"检测到冲突：-c 与 --ctx-size 同时出现 {len(ctx_seen)} 次，"
-            f"已保留最后一项 '{ctx_seen[-1]}'（llama.cpp 以最后为准）。"
-        )
-    return values, extras, warnings
-
-
-def _is_number(s):
-    try:
-        float(s)
-        return True
-    except ValueError:
-        return False
-
-
-def build_params(values, extras):
-    """由字段字典 + extras 重建 AppParameters。
-
-    顺序：FIELDS 顺序输出有值字段（统一长名）。check 型仅当值为真输出标志名。
-    滑块/数值/文本为空则跳过。combo 空字符串跳过。
-    """
-    out = []
-    st = (values.get("spec_type") or "").strip()
-    for fld in FIELDS:
-        key = fld["key"]
-        v = (values.get(key) or "").strip()
-        # 草稿相关字段仅在投机解码（draft-*）模式下输出，避免普通/ngram 模式带无效参数
-        if key.startswith("spec_draft") and not st.startswith("draft"):
-            continue
-        if fld["kind"] == "check":
-            if v in ("1", "true", "on", "yes"):
-                out.append(fld["aliases"][-1])
-            continue
-        if not v:
-            continue
-        if fld["kind"] == "combo" and v == "":
-            continue
-        primary = max(fld["aliases"], key=len)
-        out.append(primary)
-        out.append(v)
-    out.extend(extras)
-    def _quote(t):
-        # 含空格/引号/花括号的值才用双引号包裹（Windows 路径含 \\ 但不含这些，不包裹）
-        # 包裹时若内部含 \\ 或 " 再转义，保证 JSON 等可往返
-        if any(ch in t for ch in (' ', '"', '{', '}')):
-            return '"' + t.replace("\\", "\\\\").replace('"', '\\"') + '"'
-        return t
-    return " ".join(_quote(t) for t in out)
-
-
-# ---------------------------------------------------------------------------
 # 预设（命名参数组合，本地 JSON）
 # ---------------------------------------------------------------------------
 def load_presets():
@@ -888,7 +750,7 @@ class ControlGUI(ctk.CTk):
 
     def load_params(self):
         text = get_app_parameters(self.service)
-        values, extras, warnings = parse_params(text)
+        values, extras, warnings = parse_params(text, FIELDS)
         self.extras = extras
         self._apply_values(values, warnings)
 
@@ -976,12 +838,12 @@ class ControlGUI(ctk.CTk):
     def _dirty(self):
         """表单参数与当前服务是否不一致。"""
         values, extras = self._collect()
-        return build_params(values, extras) != get_app_parameters(self.service)
+        return build_params(values, extras, FIELDS) != get_app_parameters(self.service)
 
     def apply_changes(self):
         """写回表单参数；服务运行中则确认后自动重启，未运行仅写回。"""
         values, extras = self._collect()
-        new_text = build_params(values, extras)
+        new_text = build_params(values, extras, FIELDS)
         cur = get_app_parameters(self.service)
         if new_text == cur:
             messagebox.showinfo("无需改动", "参数与当前服务一致。")
