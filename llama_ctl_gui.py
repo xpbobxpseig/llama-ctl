@@ -30,6 +30,9 @@ from nssm_adapter import (
     list_nssm_services, check_health,
 )
 from params import parse_params, build_params
+from settings import load_settings, save_settings
+import strings
+from strings import t, fmt
 
 # ---------------------------------------------------------------------------
 # 配置（本机固定事实）
@@ -315,18 +318,37 @@ def save_presets(presets):
 import customtkinter as ctk
 
 # 设计基线：Apple 风浅色 —— 中性灰白底、去饱和系统蓝强调、轻分隔、大留白
-C_BG = "#f5f5f7"       # 窗口底（Apple 灰白）
-C_CARD = "#ffffff"     # 卡片底（纯白）
-C_BORDER = "#e3e3e8"   # 轻分隔线
-C_FIELD = "#fafafa"    # 输入框/下拉内底
-C_TXT = "#1d1d1f"      # 主文本（Apple 近黑）
-C_MUT = "#86868b"      # 次要文本
-C_ACC = "#0a84ff"      # 强调色（系统蓝，唯一）
-C_ACCH = "#0071e3"     # 强调 hover
-C_RED = "#ff3b30"      # Apple 红
-C_ORG = "#ff9500"      # Apple 橙
-C_GRAY = "#aeaeb2"
-C_TIP = "#f0f0f2"      # 提示框底（浅灰）
+# Apple 风双调色板：浅色为原版；深色同构（底/卡/分隔/输入框/文字互换灰阶，强调蓝不变）
+PALETTES = {
+    "light": {
+        "BG": "#f5f5f7", "CARD": "#ffffff", "BORDER": "#e3e3e8",
+        "FIELD": "#fafafa", "TXT": "#1d1d1f", "MUT": "#86868b",
+        "ACC": "#0a84ff", "ACCH": "#0071e3",
+        "RED": "#ff3b30", "ORG": "#ff9500", "GRAY": "#aeaeb2",
+        "TIP": "#f0f0f2",
+    },
+    "dark": {
+        "BG": "#1e1e20", "CARD": "#2c2c2e", "BORDER": "#3a3a3c",
+        "FIELD": "#252527", "TXT": "#f5f5f7", "MUT": "#98989d",
+        "ACC": "#0a84ff", "ACCH": "#0071e3",
+        "RED": "#ff453a", "ORG": "#ff9f0a", "GRAY": "#636366",
+        "TIP": "#2c2c2e",
+    },
+}
+_appearance = "light"  # 当前外观名，由 _apply_palette 维护
+
+
+def _apply_palette(mode):
+    """把调色板展开为模块级常量（C_*），供全部控件取色。切换外观时重建调用。"""
+    global _appearance
+    pal = PALETTES.get(mode, PALETTES["light"])
+    g = globals()
+    for name, val in pal.items():
+        g[f"C_{name}"] = val
+    _appearance = mode
+
+
+_apply_palette("light")
 
 F_BODY = ("Microsoft YaHei UI", 13)
 F_SMALL = ("Microsoft YaHei UI", 12)
@@ -374,16 +396,24 @@ class ControlGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         if sys.platform != "win32":
-            messagebox.showerror("不支持", "本工具仅支持 Windows（依赖 NSSM / sc / powershell）。")
+            messagebox.showerror(t("mb.unsupported"), t("msg.winonly"))
             self.destroy()
             return
-        ctk.set_appearance_mode("light")
-        self.title("llama.cpp 服务控制台")
+        self.settings = load_settings()
+        strings.set_lang(self.settings["language"])
+        _apply_palette("light" if self.settings["appearance"] == "dark" else
+                       ({"light": "light", "dark": "dark"}.get(self.settings["appearance"], "light")))
+        ctk.set_appearance_mode(
+            {"system": "system", "light": "light", "dark": "dark"}[self.settings["appearance"]])
+        self.title(t("app.title"))
         try:
             self.iconbitmap(os.path.join(os.path.dirname(os.path.abspath(__file__)), "llama_icon.ico"))
         except Exception:  # noqa: BLE001 - 图标缺失不阻断启动
             pass
-        self.geometry("1000x860")
+        if self.settings.get("geometry"):
+            self.geometry(self.settings["geometry"])
+        else:
+            self.geometry("1000x860")
         self.minsize(920, 720)
         self.configure(fg_color=C_BG)
 
@@ -434,7 +464,7 @@ class ControlGUI(ctk.CTk):
                      text_color=C_TXT).pack(side="left")
         svc = ctk.CTkFrame(head, fg_color="transparent")
         svc.pack(side="right")
-        ctk.CTkLabel(svc, text="服务", font=F_BODY, text_color=C_MUT).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(svc, text=t("svc.label"), font=F_BODY, text_color=C_MUT).pack(side="left", padx=(0, 6))
         self.service_var = tk.StringVar(value=self.service)
         self.cmb_service = ctk.CTkOptionMenu(svc, variable=self.service_var,
                                              values=list_nssm_services(),
@@ -449,15 +479,15 @@ class ControlGUI(ctk.CTk):
         st = self._card(self)
         row = ctk.CTkFrame(st, fg_color="transparent")
         row.pack(fill="x")
-        self.lbl_state = ctk.CTkLabel(row, text="服务 —", font=F_BODY, text_color=C_MUT)
+        self.lbl_state = ctk.CTkLabel(row, text=t("state.unknown"), font=F_BODY, text_color=C_MUT)
         self.lbl_state.pack(side="left")
-        self.lbl_health = ctk.CTkLabel(row, text="探活 —", font=F_BODY, text_color=C_MUT)
+        self.lbl_health = ctk.CTkLabel(row, text=t("health.idle"), font=F_BODY, text_color=C_MUT)
         self.lbl_health.pack(side="left", padx=(18, 0))
-        ctk.CTkLabel(row, text="开机自启", font=F_SMALL, text_color=C_MUT
+        ctk.CTkLabel(row, text=t("boot.label"), font=F_SMALL, text_color=C_MUT
                      ).pack(side="left", padx=(24, 6))
-        self.auto_var = tk.StringVar(value="手动")
+        self.auto_var = tk.StringVar(value=t("boot.manual"))
         self.opt_auto = ctk.CTkOptionMenu(row, variable=self.auto_var,
-                                          values=["自动(开机)", "手动", "禁用"],
+                                          values=[t("boot.auto"), t("boot.manual"), t("boot.disabled")],
                                           width=130, height=30, font=F_BODY,
                                           fg_color=C_FIELD, button_color=C_BORDER,
                                           button_hover_color=C_ACC, text_color=C_TXT,
@@ -465,19 +495,20 @@ class ControlGUI(ctk.CTk):
         self.opt_auto.pack(side="left")
         act = ctk.CTkFrame(row, fg_color="transparent")
         act.pack(side="right")
-        self._btn(act, "启动", lambda: self.do_action("start")).pack(side="left", padx=3)
-        self._btn(act, "停止", lambda: self.do_action("stop"), kind="danger").pack(side="left", padx=3)
-        self._btn(act, "重启", self.do_restart).pack(side="left", padx=3)
+        self._btn(act, t("btn.start"), lambda: self.do_action("start")).pack(side="left", padx=3)
+        self._btn(act, t("btn.stop"), lambda: self.do_action("stop"), kind="danger").pack(side="left", padx=3)
+        self._btn(act, t("btn.restart"), self.do_restart).pack(side="left", padx=3)
+        self._btn(act, t("btn.settings"), self.open_settings).pack(side="left", padx=(18, 3))
 
         # 预设区（单行：标题 + 可编辑下拉 + 删除图标；右侧 应用更改/还原）
         pr = self._card(self)
         prow = ctk.CTkFrame(pr, fg_color="transparent")
         prow.pack(fill="x")
-        ctk.CTkLabel(prow, text="参数预设", font=F_GROUP, text_color=C_MUT).pack(side="left")
+        ctk.CTkLabel(prow, text=t("card.presets"), font=F_GROUP, text_color=C_MUT).pack(side="left")
         self.lbl_dirty = ctk.CTkLabel(prow, text="", font=F_SMALL, text_color=C_ORG)
         self.lbl_dirty.pack(side="left", padx=12)
-        self._btn(prow, "还原", self.load_params).pack(side="right")
-        self._btn(prow, "应用更改", self.apply_changes, kind="primary").pack(side="right", padx=(0, 8))
+        self._btn(prow, t("btn.revert"), self.load_params).pack(side="right")
+        self._btn(prow, t("btn.apply2"), self.apply_changes, kind="primary").pack(side="right", padx=(0, 8))
         base = getattr(sys, "frozen", False) and os.path.dirname(os.path.abspath(sys.executable)) \
             or os.path.dirname(os.path.abspath(__file__))
         try:
@@ -497,7 +528,7 @@ class ControlGUI(ctk.CTk):
         if ic_del:
             self._btn(prow, "", self.delete_preset, kind="danger").configure(image=ic_del, width=34)
         else:
-            self._btn(prow, "删除", self.delete_preset, kind="danger")
+            self._btn(prow, t("preset.delete"), self.delete_preset, kind="danger")
         self.refresh_presets()
         self.refresh_presets()
 
@@ -509,7 +540,7 @@ class ControlGUI(ctk.CTk):
         pc.pack(fill="both", expand=True, padx=14, pady=12)
         phead = ctk.CTkFrame(pc, fg_color="transparent")
         phead.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(phead, text="启动参数", font=F_GROUP, text_color=C_MUT,
+        ctk.CTkLabel(phead, text=t("card.params"), font=F_GROUP, text_color=C_MUT,
                      anchor="w").pack(side="left")
         self.scroll = ctk.CTkScrollableFrame(pc, fg_color="transparent",
                                              scrollbar_button_color=C_GRAY,
@@ -544,7 +575,7 @@ class ControlGUI(ctk.CTk):
         head = ctk.CTkFrame(lg, fg_color="transparent")
         head.pack(fill="x", padx=14, pady=(10, 4))
         self.btn_log_toggle = ctk.CTkButton(
-            head, text="日志尾随 server.err（已折叠）", font=F_GROUP,
+            head, text=t("log.collapsed"), font=F_GROUP,
             text_color=C_MUT, anchor="w", fg_color="transparent",
             hover_color=C_BG, command=self.toggle_log)
         self.btn_log_toggle.pack(side="left")
@@ -592,7 +623,7 @@ class ControlGUI(ctk.CTk):
             if fld.get("quick"):
                 qfr = ctk.CTkFrame(parent, fg_color="transparent")
                 qfr.grid(row=row, column=1, columnspan=3, sticky="w", padx=2, pady=(0, 4))
-                ctk.CTkLabel(qfr, text="快捷：", font=F_SMALL, text_color=C_MUT
+                ctk.CTkLabel(qfr, text=t("quick.label"), font=F_SMALL, text_color=C_MUT
                              ).pack(side="left")
                 for qv in fld["quick"]:
                     txt = self._fmt_ctx(qv)
@@ -637,7 +668,7 @@ class ControlGUI(ctk.CTk):
             w = ctk.CTkEntry(parent, textvariable=v, width=430, font=F_BODY,
                              fg_color=C_FIELD, border_color=C_BORDER)
             w.grid(row=row, column=2, sticky="ew", padx=4, pady=6)
-            self._btn(parent, "浏览", lambda k=key: self._browse(k)).grid(
+            self._btn(parent, t("browse"), lambda k=key: self._browse(k)).grid(
                 row=row, column=3, sticky="w", padx=4)
             self.widgets[key] = w
             return row + 1
@@ -696,7 +727,7 @@ class ControlGUI(ctk.CTk):
         return body
 
     def _browse(self, key):
-        p = filedialog.askopenfilename(title="选择文件", initialdir=r"F:\AI_Model")
+        p = filedialog.askopenfilename(title=t("file.pick"), initialdir=r"F:\AI_Model")
         if p:
             self.var[key].set(p)
 
@@ -709,7 +740,12 @@ class ControlGUI(ctk.CTk):
         self.refresh_status()
         self.load_params()
         mode = get_start_mode(self.service)
-        self.auto_var.set({"auto": "自动(开机)", "manual": "手动", "disabled": "禁用"}.get(mode, "手动"))
+        self.auto_var.set({"auto": t("boot.auto"), "manual": t("boot.manual"), "disabled": t("boot.disabled")}.get(mode, t("boot.manual")))
+        # 恢复上次预设（仅当仍存在）
+        last = self.settings.get("last_preset") if getattr(self, "settings", None) else ""
+        if last and last in load_presets():
+            self.preset_var.set(last)
+            self.load_preset(last)
 
     @staticmethod
     def _state_color(state):
@@ -717,14 +753,14 @@ class ControlGUI(ctk.CTk):
 
     def refresh_status(self):
         state = sc_query_state(self.service)
-        self.lbl_state.configure(text=f"服务 {state}",
+        self.lbl_state.configure(text=fmt("status.svc", st=state),
                                  text_color=self._state_color(state))
         host = self.var["host"].get().strip() or "127.0.0.1"
         port = self.var["port"].get().strip() or "8080"
         if state == "RUNNING":
             ok, detail = check_health(host, port)
             self.lbl_health.configure(
-                text=f"探活 {'OK' if ok else 'FAIL'} · {detail[:40]}",
+                text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
                 text_color=C_ACC if ok else C_RED)
         else:
             self.lbl_health.configure(text="探活 未运行", text_color=C_GRAY)
@@ -765,7 +801,7 @@ class ControlGUI(ctk.CTk):
         """把当前表单存为预设。名称取自合并下拉框；已有名则覆盖更新，无弹窗。"""
         name = self.preset_var.get().strip()
         if not name:
-            messagebox.showwarning("提示", "请先在下拉框输入或选择一个预设名。")
+            messagebox.showwarning(t("mb.hint"), t("msg.presetname"))
             return
         values, _ = self._collect()
         presets = load_presets()
@@ -781,7 +817,7 @@ class ControlGUI(ctk.CTk):
             return
         presets = load_presets()
         if name not in presets:
-            messagebox.showerror("错误", f"预设「{name}」不存在。")
+            messagebox.showerror(t("mb.error"), fmt("msg.preset.miss", n=name))
             return
         # 即选即载：直接填表单，无弹窗
         self._apply_values(presets[name])
@@ -790,7 +826,7 @@ class ControlGUI(ctk.CTk):
         """下拉选择：若表单有未应用更改，先把当前表单自动存为新预设，再载入所选。"""
         if self._dirty():
             cur = self.preset_var.get().strip()
-            cur_name = cur if (cur and cur != name) else f"自动备份 {time.strftime('%m-%d %H:%M')}"
+            cur_name = cur if (cur and cur != name) else fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M'))
             values, _ = self._collect()
             presets = load_presets()
             presets[cur_name] = values
@@ -812,9 +848,9 @@ class ControlGUI(ctk.CTk):
     def delete_preset(self):
         name = self.preset_var.get()
         if not name:
-            messagebox.showwarning("提示", "请先在下拉选择一个预设。")
+            messagebox.showwarning(t("mb.hint"), t("msg.preset.pick"))
             return
-        if not messagebox.askyesno("确认", f"删除预设「{name}」？"):
+        if not messagebox.askyesno(t("mb.confirm"), fmt("msg.preset.del", n=name)):
             return
         presets = load_presets()
         presets.pop(name, None)
@@ -846,74 +882,72 @@ class ControlGUI(ctk.CTk):
         new_text = build_params(values, extras, FIELDS)
         cur = get_app_parameters(self.service)
         if new_text == cur:
-            messagebox.showinfo("无需改动", "参数与当前服务一致。")
+            messagebox.showinfo(t("mb.unchanged"), t("msg.nochange"))
             return
         state = sc_query_state(self.service)
         if state == "RUNNING":
-            msg = (f"服务正在运行，将写回新参数并自动重启（{self.service}）：\n\n"
-                   f"新参数：\n{new_text}\n\n旧参数：\n{cur}\n\n确认？")
+            msg = fmt("msg.apply.run", s=self.service, n=new_text, o=cur)
         else:
-            msg = (f"即将写回 NSSM AppParameters（服务 {self.service}，当前未运行）：\n\n"
-                   f"新参数：\n{new_text}\n\n旧参数：\n{cur}\n\n确认写回？")
-        if not messagebox.askyesno("二次确认", msg):
+            msg = fmt("msg.apply.stop", s=self.service, n=new_text, o=cur)
+        if not messagebox.askyesno(t("mb.doublecheck"), msg):
             return
         ok, out = set_app_parameters(self.service, new_text)
         if not ok:
-            messagebox.showerror("失败", f"写回失败：{out}")
+            messagebox.showerror(t("mb.fail"), fmt("msg.write.fail", o=out))
             return
         if state == "RUNNING":
             self.do_restart()
         else:
-            messagebox.showinfo("成功", "已写回。服务未运行，下次启动即生效。")
+            messagebox.showinfo(t("mb.success"), t("msg.written"))
             self.refresh_status()
 
     # ---- 生命周期 ----
     def do_action(self, action):
         ok, msg = sc_action(action, self.service)
         if ok:
-            messagebox.showinfo("成功", f"sc {action} 已提交（服务 {self.service}）。")
+            messagebox.showinfo(t("mb.success"), fmt("msg.sc.done", a=action, s=self.service))
         else:
-            messagebox.showerror("失败", f"sc {action} 失败：{msg}")
+            messagebox.showerror(t("mb.fail"), fmt("msg.sc.fail", a=action, m=msg))
         self.after(1500, self.refresh_status)
 
     def do_restart(self):
         threading.Thread(target=self._restart_worker, daemon=True).start()
 
     def _restart_worker(self):
-        self._log_line(f">>> 重启 {self.service}：停止...")
+        self._log_line(fmt("log.restart.stop", s=self.service))
         sc_action("stop", self.service)
         for _ in range(40):
             if sc_query_state(self.service) == "STOPPED":
                 break
             time.sleep(0.5)
         self.after(0, self.refresh_status)
-        self._log_line(">>> 启动...")
+        self._log_line(t("log.restart.start"))
         sc_action("start", self.service)
         for _ in range(120):
             if sc_query_state(self.service) == "RUNNING":
                 ok, d = check_health(self.var["host"].get().strip() or "127.0.0.1",
                                      self.var["port"].get().strip() or "8080")
                 if ok:
-                    self._log_line(f">>> 服务就绪：{d}")
+                    self._log_line(fmt("log.restart.ready", d=d))
                     break
             time.sleep(0.5)
         self.after(0, self.refresh_status)
 
     def apply_auto(self):
         """下拉即选即应用（无成功弹窗，失败才提示）。"""
-        mode = {"自动(开机)": "auto", "手动": "manual", "禁用": "disabled"}.get(self.auto_var.get(), "manual")
+        mode = {t("boot.auto"): "auto", t("boot.manual"): "manual", t("boot.disabled"): "disabled"}.get(self.auto_var.get(), "manual")
         ok, out = set_start_mode(self.service, mode)
         if not ok:
-            messagebox.showerror("失败", f"开机自启设置失败：{out}")
+            messagebox.showerror(t("mb.fail"), fmt("msg.auto.fail", o=out))
 
     # ---- 日志 ----
     def toggle_log(self):
         self._log_open.set(not self._log_open.get())
         if self._log_open.get():
-            self.btn_log_toggle.configure(text="日志尾随 server.err（点击折叠）", text_color=C_TXT)
+            self.btn_log_toggle.configure(text=t("log.expanded"), text_color=C_TXT)
             self.txt_log.pack(fill="both", expand=True, padx=14, pady=(0, 12))
         else:
-            self.btn_log_toggle.configure(text="日志尾随 server.err（已折叠）", text_color=C_MUT)
+            self.btn_log_toggle.configure(text=t("log.collapsed"), text_color=C_MUT)
             self.txt_log.pack_forget()
 
     def _log_line(self, text):
@@ -962,17 +996,82 @@ class ControlGUI(ctk.CTk):
             ok, detail = check_health(self.var["host"].get().strip() or "127.0.0.1",
                                       self.var["port"].get().strip() or "8080")
             self.lbl_health.configure(
-                text=f"探活 {'OK' if ok else 'FAIL'} · {detail[:40]}",
+                text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
                 text_color=C_ACC if ok else C_RED)
         else:
             self.lbl_health.configure(text="探活 未运行", text_color=C_GRAY)
-        self.lbl_state.configure(text=f"服务 {state}",
+        self.lbl_state.configure(text=fmt("status.svc", st=state),
                                  text_color=self._state_color(state))
         self.after(3000, self._poll_health)
 
     def _on_close(self):
         self._stop_poll = True
+        try:
+            self.settings["geometry"] = self.geometry()
+            self.settings["last_preset"] = self.preset_var.get().strip()
+            save_settings(self.settings)
+        except Exception:  # noqa: BLE001 - 设置保存失败不阻断退出
+            pass
         self.destroy()
+
+    # ---- 设置窗口 ----
+    def open_settings(self):
+        win = ctk.CTkToplevel(self)
+        win.title(t("settings.title"))
+        win.geometry("420x260")
+        win.transient(self)
+        win.grab_set()
+        self._settings_win = win
+
+        ctk.CTkLabel(win, text=t("settings.lang"), font=F_BODY, anchor="w"
+                     ).pack(fill="x", padx=20, pady=(20, 4))
+        lang_menu = ctk.CTkOptionMenu(
+            win, values=["中文", "English"], width=180, font=F_BODY,
+            command=lambda v: self._change_language(v, win))
+        lang_menu.set("中文" if strings._current == "zh" else "English")
+        lang_menu.pack(anchor="w", padx=20)
+
+        ctk.CTkLabel(win, text=t("settings.appear"), font=F_BODY, anchor="w"
+                     ).pack(fill="x", padx=20, pady=(16, 4))
+        appear_names = {"system": t("appear.system"), "light": t("appear.light"),
+                        "dark": t("appear.dark")}
+        rev = {v: k for k, v in appear_names.items()}
+        appear_menu = ctk.CTkOptionMenu(
+            win, values=list(appear_names.values()), width=180, font=F_BODY,
+            command=lambda v: self._change_appearance(rev[v], win))
+        appear_menu.set(appear_names.get(self.settings.get("appearance", "system"),
+                                         t("appear.system")))
+        appear_menu.pack(anchor="w", padx=20)
+
+        ctk.CTkLabel(win, text=t("settings.note"), font=F_SMALL, text_color=C_MUT,
+                     wraplength=360, justify="left").pack(fill="x", padx=20, pady=(16, 0))
+        self._btn(win, t("settings.close"), win.destroy).pack(pady=(14, 12))
+
+    def _change_language(self, shown, win=None):
+        self.settings["language"] = "zh" if shown == "中文" else "en"
+        strings.set_lang(self.settings["language"])
+        save_settings(self.settings)
+        self._restart_ui()
+
+    def _change_appearance(self, mode, win=None):
+        self.settings["appearance"] = mode
+        save_settings(self.settings)
+        ctk.set_appearance_mode({"system": "system", "light": "light",
+                                 "dark": "dark"}[mode])
+        self._restart_ui()
+
+    def _restart_ui(self):
+        """销毁并按新语言/调色板重建全部部件（设置即时生效）。"""
+        _apply_palette("dark" if self.settings.get("appearance") == "dark" else "light")
+        for w in self.winfo_children():
+            w.destroy()
+        self.var.clear()
+        self.widgets.clear()
+        self.val_labels.clear()
+        self.title(t("app.title"))
+        self.configure(fg_color=C_BG)
+        self._build_widgets()
+        self.refresh_all()
 
 
 def main():
