@@ -15,6 +15,7 @@ llama_ctl_gui.py — llama.cpp 服务控制台（通用版）
 
 import os
 import json
+import math
 import queue
 import re
 import subprocess
@@ -32,7 +33,7 @@ from nssm_adapter import (
 )
 from params import parse_params, build_params
 from settings import load_settings, save_settings
-from motion import Animator
+from motion import Animator, format_hex, lerp, ease_out_cubic
 import strings
 from strings import t, fmt
 
@@ -441,6 +442,13 @@ class ControlGUI(ctk.CTk):
         # 动效引擎：注入 Tk after 作调度器（motion.py 纯数值模块）；
         # 必须在 _build_widgets 之前创建，D4 起的 hover 绑定会用到。
         self.anim = Animator(schedule=lambda fn, ms: self.after(ms, fn))
+        # 状态圆点动效状态（D3）：呼吸/错误闪烁的注册 id 与守卫标志
+        self._breathing = False      # 呼吸循环是否应持续
+        self._breath_id = -1         # 当前呼吸动画 id（-1 = 无）
+        self._breath_busy = False    # 防同步重入（animate 降级时 on_done 同步回调）
+        self._breath_resume = False  # 错误闪烁结束后是否恢复呼吸
+        self._flash_id = -1          # 当前闪烁动画 id（-1 = 无）
+        self._flash_armed = True     # FAIL 只闪一次，恢复 OK 后重新武装
         self._restarting = False
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
 
@@ -498,6 +506,9 @@ class ControlGUI(ctk.CTk):
         st = self._card(self)
         row = ctk.CTkFrame(st, fg_color="transparent")
         row.pack(fill="x")
+        self.dot_state = ctk.CTkLabel(row, text="\u25CF", width=12, font=F_BODY)
+        self.dot_state.configure(text_color=C_STOP)
+        self.dot_state.pack(side="left")
         self.lbl_state = ctk.CTkLabel(row, text=t("state.unknown"), font=F_BODY, text_color=C_MUT)
         self.lbl_state.pack(side="left")
         self.lbl_health = ctk.CTkLabel(row, text=t("health.idle"), font=F_BODY, text_color=C_MUT)
@@ -780,6 +791,101 @@ class ControlGUI(ctk.CTk):
     def _state_color(state):
         return {"RUNNING": C_RUN, "STOPPED": C_STOP}.get(state, C_ORG)
 
+    # ---- 状态圆点动效（D3：呼吸 + 错误闪烁） ----
+    def _breath_loop(self):
+        """绿点呼吸：1200ms/周期，亮度 ±12% 余弦脉动，on_done 续调下一轮。
+
+        用 self.anim（schedule 注入 after）驱动；动效关或状态变化时
+        _update_status_dot 会 cancel 掉当前 id 并置 _breathing=False，循环自然终止。
+        animate() 返回 -1（瞬时/降级）时不进注册表：id 直接置 -1，on_done 已同步
+        执行（_breath_loop 再入时若 _breathing 仍真则继续下一轮）。
+        """
+        def _frame(p):
+            amp = 0.12 * (0.5 - 0.5 * math.cos(2 * math.pi * p))
+            self.dot_state.configure(
+                text_color=format_hex(lerp(C_RUN, _breath_peak, amp)))
+
+        if not self._breathing or self._breath_busy:
+            return
+        _breath_peak = "#ffffff" if ctk.get_appearance_mode() == "Light" else "#000000"
+        self._breath_busy = True
+        self._breath_id = self.anim.animate(_frame, 1200, on_done=self._breath_loop)
+        self._breath_busy = False
+        if self._breath_id <= 0:  # 瞬时/降级：on_done 已同步续调过，不再续
+            self._breath_id = -1
+
+    def _flash_error(self):
+        """错误闪烁：dot 在 C_RED 与 RUNNING 原色间交替 2 轮（600ms，ease-out cubic）。
+
+        动效关时只切一次红色，不循环。on_done 恢复原色并决定是否续呼吸。
+        降级（animate 返回 -1）时 on_done 已同步执行，不续调。
+        """
+        if not self._motion_on():
+            self.dot_state.configure(text_color=C_RED)
+            return
+
+        def _frame(p):
+            t = ease_out_cubic(p, 1)  # 索引式缓动：i=p, steps=1 → 连续化
+            red = math.sin(t * 4 * math.pi) > 0  # 2 轮完整交替：红/原/红/原（2×300ms）
+            self.dot_state.configure(text_color=C_RED if red else C_RUN)
+
+        self._flash_id = self.anim.animate(
+            _frame, 600, on_done=self._flash_done)
+        if self._flash_id <= 0:  # 瞬时/降级：on_done 已同步执行完毕
+            self._flash_id = -1
+
+    def _flash_done(self):
+        self._flash_id = -1
+        if self._breath_resume:
+            self._breath_resume = False
+            self._breathing = True
+            self._breath_loop()
+        else:
+            self.dot_state.configure(text_color=C_RUN)  # 安全回退：闪烁只在 RUNNING 时触发
+
+    def _update_status_dot(self, state, health_ok):
+        """状态圆点同步入口（refresh_status 与 _poll_health 共用）。
+
+        RUNNING：健康则呼吸（动效关 = 静态绿），探活失败则错误闪烁（武装标志
+        保证连续 FAIL 只闪一次，恢复 OK 重新武装）；STOPPED 静态灰；
+        其他（过渡态）静态橙。
+        """
+        if state == "RUNNING":
+            if health_ok:
+                self._flash_armed = True
+                if self._flash_id > 0:
+                    return  # 闪烁进行中，由 on_done 恢复
+                if self._motion_on():
+                    self._breathing = True
+                    if self._breath_id <= 0:  # 已有动画在跑（on_done 续调）则不重复开
+                        self._breath_loop()
+                else:
+                    self._breathing = False
+                    if self._breath_id > 0:
+                        self.anim.cancel(self._breath_id)
+                        self._breath_id = -1
+                    self.dot_state.configure(text_color=C_RUN)
+            else:
+                self._breathing = False
+                if self._breath_id > 0:
+                    self.anim.cancel(self._breath_id)
+                    self._breath_id = -1
+                if self._flash_armed:
+                    self._flash_armed = False
+                    self._breath_resume = True  # 闪完若仍 RUNNING 则续呼吸
+                    self._flash_error()
+        else:
+            self._breathing = False
+            if self._breath_id > 0:
+                self.anim.cancel(self._breath_id)
+                self._breath_id = -1
+            if self._flash_id > 0:
+                self._breath_resume = False
+                self.anim.cancel(self._flash_id)
+                self._flash_id = -1
+            self.dot_state.configure(
+                text_color=C_STOP if state == "STOPPED" else C_ORG)
+
     def refresh_status(self):
         state = sc_query_state(self.service)
         self.lbl_state.configure(text=fmt("status.svc", st=state),
@@ -791,8 +897,10 @@ class ControlGUI(ctk.CTk):
             self.lbl_health.configure(
                 text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
                 text_color=C_RUN if ok else C_RED)
+            self._update_status_dot(state, ok)
         else:
             self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
+            self._update_status_dot(state, True)
 
     # ---- 参数读写 ----
     def _apply_values(self, values, warnings=None):
@@ -1101,8 +1209,10 @@ class ControlGUI(ctk.CTk):
             self.lbl_health.configure(
                 text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
                 text_color=C_RUN if ok else C_RED)
+            self._update_status_dot(state, ok)
         else:
             self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
+            self._update_status_dot(state, True)
         self.lbl_state.configure(text=fmt("status.svc", st=state),
                                  text_color=self._state_color(state))
         self.after(3000, self._poll_health)
@@ -1190,6 +1300,13 @@ class ControlGUI(ctk.CTk):
         self.var.clear()
         self.widgets.clear()
         self.val_labels.clear()
+        # 状态圆点动效复位：新控件未知，取消在途动画并重置全部 id/守卫
+        self.anim.cancel_all()
+        self._breathing = False
+        self._breath_id = -1
+        self._flash_id = -1
+        self._breath_resume = False
+        self._flash_armed = True
         self.title(t("app.title"))
         self.configure(fg_color=C_BG)
         self._build_widgets()
