@@ -35,6 +35,17 @@ from settings import load_settings, save_settings
 import strings
 from strings import t, fmt
 
+
+def _resource_dir():
+    """资源目录：onefile 打包时取 PyInstaller 解包目录（sys._MEIPASS），
+    开发模式取脚本所在目录。图标（ico/png）在构建时经 spec datas 打入包内。"""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return meipass
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
 # ---------------------------------------------------------------------------
 # 配置（本机固定事实）
 # ---------------------------------------------------------------------------
@@ -406,7 +417,7 @@ class ControlGUI(ctk.CTk):
             {"system": "system", "light": "light", "dark": "dark"}[self.settings["appearance"]])
         self.title(t("app.title"))
         try:
-            self.iconbitmap(os.path.join(os.path.dirname(os.path.abspath(__file__)), "llama_icon.ico"))
+            self.iconbitmap(os.path.join(_resource_dir(), "llama_icon.ico"))
         except Exception:  # noqa: BLE001 - 图标缺失不阻断启动
             pass
         if self.settings.get("geometry"):
@@ -511,8 +522,7 @@ class ControlGUI(ctk.CTk):
         self.lbl_dirty.pack(side="left", padx=12)
         self._btn(prow, t("btn.revert"), self.load_params).pack(side="right")
         self._btn(prow, t("btn.apply2"), self.apply_changes, kind="primary").pack(side="right", padx=(0, 8))
-        base = getattr(sys, "frozen", False) and os.path.dirname(os.path.abspath(sys.executable)) \
-            or os.path.dirname(os.path.abspath(__file__))
+        base = _resource_dir()
         try:
             ic_del = ctk.CTkImage(PILImage.open(os.path.join(base, "ic_trash.png")), size=(18, 18))
         except Exception:  # noqa: BLE001 - 图标缺失退化为文字
