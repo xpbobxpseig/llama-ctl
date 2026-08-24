@@ -335,6 +335,7 @@ PALETTES = {
         "FIELD": "#fafafa", "TXT": "#1d1d1f", "MUT": "#86868b",
         "ACC": "#0a84ff", "ACCH": "#0071e3",
         "RED": "#ff3b30", "ORG": "#ff9500", "GRAY": "#aeaeb2",
+        "RUN": "#30d158", "STOP": "#8e8e93",
         "TIP": "#f0f0f2",
     },
     "dark": {
@@ -342,6 +343,7 @@ PALETTES = {
         "FIELD": "#252527", "TXT": "#f5f5f7", "MUT": "#98989d",
         "ACC": "#0a84ff", "ACCH": "#0071e3",
         "RED": "#ff453a", "ORG": "#ff9f0a", "GRAY": "#636366",
+        "RUN": "#30d158", "STOP": "#636366",
         "TIP": "#2c2c2e",
     },
 }
@@ -769,7 +771,7 @@ class ControlGUI(ctk.CTk):
 
     @staticmethod
     def _state_color(state):
-        return {"RUNNING": C_ACC, "STOPPED": C_GRAY}.get(state, C_ORG)
+        return {"RUNNING": C_RUN, "STOPPED": C_STOP}.get(state, C_ORG)
 
     def refresh_status(self):
         state = sc_query_state(self.service)
@@ -781,7 +783,7 @@ class ControlGUI(ctk.CTk):
             ok, detail = check_health(host, port)
             self.lbl_health.configure(
                 text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
-                text_color=C_ACC if ok else C_RED)
+                text_color=C_RUN if ok else C_RED)
         else:
             self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
 
@@ -1079,7 +1081,7 @@ class ControlGUI(ctk.CTk):
                                       self.var["port"].get().strip() or "8080")
             self.lbl_health.configure(
                 text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
-                text_color=C_ACC if ok else C_RED)
+                text_color=C_RUN if ok else C_RED)
         else:
             self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
         self.lbl_state.configure(text=fmt("status.svc", st=state),
