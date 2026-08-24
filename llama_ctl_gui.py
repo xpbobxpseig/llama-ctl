@@ -765,7 +765,7 @@ class ControlGUI(ctk.CTk):
                                       border_color=C_BORDER, wrap="none")
         self.txt_log.configure(state="disabled")
         # 新行渐隐高亮 tag（D5）：插入后 ≤200ms 移除背景
-        self.txt_log.tag_configure("flash", background="#fff3cd")
+        self.txt_log._textbox.tag_configure("flash", background="#fff3cd")
         # 默认不打包日志区，仅头部行
         # 警告行（解析告警）挂在日志折叠条下方
         self.lbl_warn = ctk.CTkLabel(self, text="", font=F_SMALL, text_color=C_ORG,
@@ -1512,13 +1512,13 @@ class ControlGUI(ctk.CTk):
         start = None
         if self._motion_on() and len(new_lines) <= 200:
             self.txt_log.configure(state="normal")
-            self.txt_log.mark_set("flash_start", "end-1c")
-            start = self.txt_log.index("flash_start")
+            self.txt_log._textbox.mark_set("flash_start", "end-1c")
+            start = self.txt_log._textbox.index("flash_start")
         self.txt_log.configure(state="normal")
         for ln in new_lines:
             self.txt_log.insert("end", ln + "\n")
         if start is not None:
-            self.txt_log.tag_add("flash", "flash_start", "end-1c")
+            self.txt_log._textbox.tag_add("flash", "flash_start", "end-1c")
             self.txt_log.after(200, self._clear_flash_tag)
         if int(self.txt_log.index("end-1c").split(".")[0]) > 500:
             self.txt_log.delete("1.0", "501.0")
@@ -1528,7 +1528,7 @@ class ControlGUI(ctk.CTk):
     def _clear_flash_tag(self):
         """新行渐隐收尾：移除 flash 背景 tag（控件销毁后调用会抛 TclError，吞掉）。"""
         try:
-            self.txt_log.tag_delete("flash")
+            self.txt_log._textbox.tag_delete("flash")
         except Exception:  # noqa: BLE001 - 控件已销毁/重建时无需处理
             pass
 
