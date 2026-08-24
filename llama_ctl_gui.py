@@ -459,17 +459,90 @@ class ControlGUI(ctk.CTk):
 
     # ---- 通用小组件 ----
     def _btn(self, parent, text, cmd, kind="ghost"):
-        """kind: primary / ghost / danger-text"""
+        """kind: primary / ghost / danger-text。
+
+        hover 动效（D4）：native hover_color 固定为底色，颜色过渡完全由
+        <Enter>/<Leave> 走 self.anim（160ms ease-out）；动效关时仍走原生瞬时
+        hover。禁用态（t5 联动置灰）跳过动效，避免覆盖禁用外观。
+        """
         kw = dict(font=F_BODY, corner_radius=8, height=32)
         if kind == "primary":
-            kw.update(fg_color=C_ACC, hover_color=C_ACCH, text_color="#ffffff")
+            base, hover = C_ACC, C_ACCH
         elif kind == "danger":
-            kw.update(fg_color="transparent", hover_color="#fdeceb",
-                      text_color=C_RED, border_width=1, border_color=C_BORDER)
+            base, hover = C_RED, "#fdeceb"
         else:
-            kw.update(fg_color="transparent", hover_color=C_CARD,
-                      text_color=C_TXT, border_width=1, border_color=C_BORDER)
-        return ctk.CTkButton(parent, text=text, command=cmd, **kw)
+            base, hover = C_TXT, C_CARD
+        if kind == "primary":
+            kw.update(fg_color=base, hover_color=base, text_color="#ffffff")
+        else:
+            kw.update(fg_color="transparent", hover_color=base, text_color=base,
+                      border_width=1, border_color=C_BORDER)
+        btn = ctk.CTkButton(parent, text=text, command=cmd, **kw)
+
+        # hover 动效状态（闭包）：aid 当前 tween id；cur 我们最近写入的可插值颜色。
+        # 关键点：Tk 事件按注册序执行，CTk 内部 <Enter>/<Leave> 先于本 handler 把
+        # fg_color 复位，因此不能读 cget 取起点——用闭包记住自己写的颜色。
+        hstate = {"aid": -1, "cur": None}
+
+        def _resolve_base():
+            """transparent 基色按祖先链解析出真实底色（ghost/danger 落在卡片/行上）。
+
+            None（fg_color 未设置）与 transparent 等价，都继续向上找。
+            """
+            p = btn.master
+            while p is not None:
+                try:
+                    c = p.cget("fg_color")
+                    if c and c != "transparent":
+                        return c
+                except Exception:  # noqa: BLE001 - 非 ctk 容器无 fg_color
+                    pass
+                p = getattr(p, "master", None)
+            return C_CARD
+
+        def _fg_hover(target, back_to_transparent=False):
+            """进入：cur→hover；离开：cur→底色（末帧还原 transparent）。"""
+            if hstate["aid"] > 0:
+                self.anim.cancel(hstate["aid"])
+                hstate["aid"] = -1
+            if btn.cget("state") == "disabled":
+                return  # t5 联动置灰时不动外观
+            if hstate["cur"] is None:
+                hstate["cur"] = _resolve_base()
+            start = hstate["cur"]
+            if not self._motion_on():
+                btn.configure(fg_color="transparent" if back_to_transparent else target)
+                hstate["cur"] = _resolve_base() if back_to_transparent else target
+                return
+
+            def _tick(p):
+                if btn.cget("state") == "disabled":
+                    return  # 中途被置灰（如 t5 轮询）：停止写色，保住禁用外观
+                t = ease_out_cubic(p, 1)
+                col = format_hex(lerp(start, target, t))
+                hstate["cur"] = col
+                btn.configure(fg_color=col)
+
+            def _done():
+                hstate["aid"] = -1
+                if btn.cget("state") == "disabled":
+                    return
+                if back_to_transparent:
+                    btn.configure(fg_color="transparent")
+                    hstate["cur"] = _resolve_base()
+                else:
+                    hstate["cur"] = target
+
+            hstate["aid"] = self.anim.animate(_tick, 160, on_done=_done)
+            if hstate["aid"] <= 0:  # 瞬时/降级：on_done 已同步执行
+                hstate["aid"] = -1
+
+        btn.bind("<Enter>", lambda e: _fg_hover(hover))
+        # 离开：primary 回到自身底色 C_ACC；ghost/danger 回 transparent（插值到祖先底色）
+        btn.bind("<Leave>", lambda e: _fg_hover(
+            base if kind == "primary" else _resolve_base(),
+            back_to_transparent=(kind != "primary")))
+        return btn
 
     def _card(self, parent, title=None, expand=False):
         fr = ctk.CTkFrame(parent, fg_color=C_CARD, corner_radius=14,
@@ -480,6 +553,31 @@ class ControlGUI(ctk.CTk):
         if title:
             ctk.CTkLabel(inner, text=title, font=F_GROUP, text_color=C_MUT,
                          anchor="w").pack(fill="x", pady=(0, 8))
+        # 卡片 hover 抬升（D4，动效 2）：边框从 C_BORDER 插到浅蓝再插回，200ms
+        hover_border = "#cfe6ff" if ctk.get_appearance_mode() == "Light" else "#0a84ff"
+
+        def _tick(p):
+            t = ease_out_cubic(p, 1)
+            fr.configure(border_color=format_hex(lerp(C_BORDER, hover_border, t)))
+
+        def _enter(_):
+            if self._motion_on():
+                self.anim.animate(_tick, 200)  # -1 降级即同步终态
+            else:
+                fr.configure(border_color=hover_border)  # 动效关：瞬切
+
+        def _leave(_):
+            if self._motion_on():
+                def _back(p):
+                    t = ease_out_cubic(p, 1)
+                    fr.configure(border_color=format_hex(lerp(hover_border, C_BORDER, t)))
+
+                self.anim.animate(_back, 200)  # -1 降级即同步终态
+            else:
+                fr.configure(border_color=C_BORDER)
+
+        fr.bind("<Enter>", _enter)
+        fr.bind("<Leave>", _leave)
         return inner
 
     # ---- 布局 ----
@@ -541,7 +639,8 @@ class ControlGUI(ctk.CTk):
         self.lbl_dirty.pack(side="left", padx=12)
         self.btn_revert = self._btn(prow, t("btn.revert"), self.load_params)
         self.btn_revert.pack(side="right")
-        self._btn(prow, t("btn.apply2"), self.apply_changes, kind="primary").pack(side="right", padx=(0, 8))
+        self.btn_apply = self._btn(prow, t("btn.apply2"), self.apply_changes, kind="primary")
+        self.btn_apply.pack(side="right", padx=(0, 8))
         base = _resource_dir()
         try:
             ic_del = ctk.CTkImage(PILImage.open(os.path.join(base, "ic_trash.png")), size=(18, 18))
@@ -958,6 +1057,7 @@ class ControlGUI(ctk.CTk):
             return
         # 即选即载：直接填表单，无弹窗
         self._apply_values(presets[name])
+        self._flash_preset_highlight()
 
     def on_preset_selected(self, name):
         """下拉选择：若表单有未应用更改，先把当前表单自动存为新预设，再载入所选。"""
@@ -981,6 +1081,27 @@ class ControlGUI(ctk.CTk):
         presets = load_presets()
         presets[name] = values
         save_presets(presets)
+        self._flash_preset_highlight()
+
+    def _flash_preset_highlight(self):
+        """预设选中高亮（D4，动效 6）：下拉框底色插到 #0a84ff 12% 等效浅蓝再插回 FIELD。
+
+        动效关时直接跳过（无动画，不打扰）。降级（animate 返回 -1）时 on_done
+        已同步执行，无需处理 id。
+        """
+        if not self._motion_on():
+            return
+        target = format_hex(lerp(C_FIELD, C_ACC, 0.12))  # 蓝 12% 等效浅蓝（随主题）
+
+        def _out(p):
+            t = ease_out_cubic(p, 1)
+            self.cmb_preset.configure(fg_color=format_hex(lerp(C_FIELD, target, t)))
+
+        def _back(p):
+            t = ease_out_cubic(p, 1)
+            self.cmb_preset.configure(fg_color=format_hex(lerp(target, C_FIELD, t)))
+
+        self.anim.animate(_out, 120, on_done=lambda: self.anim.animate(_back, 120))
 
     def delete_preset(self):
         name = self.preset_var.get()
@@ -1032,11 +1153,32 @@ class ControlGUI(ctk.CTk):
         if not ok:
             messagebox.showerror(t("mb.fail"), fmt("msg.write.fail", o=out))
             return
+        # 应用成功即时反馈（D4）：按钮短变绿 240ms 后插回原色（无论运行/未运行）
+        self._flash_applied()
         if state == "RUNNING":
             self.do_restart()
         else:
             messagebox.showinfo(t("mb.success"), t("msg.written"))
             self.refresh_status()
+
+    def _flash_applied(self):
+        """「应用更改」成功反馈：fg_color 从 C_ACC 插到 C_RUN（240ms）再插回 C_ACC。
+
+        动效关时跳过；降级（-1）时两段 on_done 同步执行，无需处理 id。
+        """
+        if not self._motion_on():
+            return
+
+        def _to_green(p):
+            t = ease_out_cubic(p, 1)
+            self.btn_apply.configure(fg_color=format_hex(lerp(C_ACC, C_RUN, t)))
+
+        def _to_blue(p):
+            t = ease_out_cubic(p, 1)
+            self.btn_apply.configure(fg_color=format_hex(lerp(C_RUN, C_ACC, t)))
+
+        self.anim.animate(_to_green, 240,
+                          on_done=lambda: self.anim.animate(_to_blue, 240))
 
     # ---- 生命周期 ----
     def do_action(self, action):
