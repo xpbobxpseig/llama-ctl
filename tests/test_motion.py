@@ -342,6 +342,37 @@ def test_degrade_when_active_exceeds_max(env):
     assert len(a._active) == 3, "注册表不受影响"
 
 
+def test_animate_instant_returns_minus_one_not_registered(env):
+    """契约：瞬时完成（duration<=0）与降级路径返回 -1（无 anim_id），不进注册表；
+    cancel(-1) 返回 False 且不误伤其他活动动画。"""
+    q, clock, a = env
+    # 瞬时路径（duration<=0）
+    got1 = []
+    assert a.animate(lambda p: got1.append(p), 0) == -1
+    assert got1 == [1.0]
+    assert not a._active, "瞬时完成不得进注册表"
+    # 降级路径（活动数超 max_active）
+    a.max_active = 2
+    for _ in range(3):
+        a.animate(lambda p: None, 100)
+    assert len(a._active) == 3
+    got2 = []
+    assert a.animate(lambda p: got2.append(p), 100) == -1
+    assert got2 == [1.0]
+    assert len(a._active) == 3, "降级不得改动注册表"
+    # cancel(-1)：False，且不误伤仍在活动的动画
+    assert a.cancel(-1) is False
+    assert len(a._active) == 3
+
+
+def test_normal_path_id_cancel_semantics(env):
+    """对照：正常路径返回正 id，cancel 有效；cancel 后再 cancel 同 id 返回 False。"""
+    q, clock, a = env
+    aid = a.animate(lambda p: None, 100)
+    assert aid >= 1
+    assert a.cancel(aid) is True
+    assert a.cancel(aid) is False
+
 def test_default_max_active_is_8(env):
     q, clock, a = env
     assert a.max_active == 8
