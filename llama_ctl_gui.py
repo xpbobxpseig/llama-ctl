@@ -33,7 +33,7 @@ from nssm_adapter import (
 )
 from params import parse_params, build_params
 from settings import load_settings, save_settings
-from motion import Animator, format_hex, lerp, ease_out_cubic
+from motion import Animator, format_hex, lerp, ease_out_cubic, ease_in_cubic
 import strings
 from strings import t, fmt
 
@@ -449,6 +449,7 @@ class ControlGUI(ctk.CTk):
         self._breath_resume = False  # 错误闪烁结束后是否恢复呼吸
         self._flash_id = -1          # 当前闪烁动画 id（-1 = 无）
         self._flash_armed = True     # FAIL 只闪一次，恢复 OK 后重新武装
+        self._log_anim_id = -1       # 日志面板高度过渡动画 id（-1 = 无）
         self._restarting = False
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
 
@@ -709,10 +710,12 @@ class ControlGUI(ctk.CTk):
             text_color=C_MUT, anchor="w", fg_color="transparent",
             hover_color=C_BG, command=self.toggle_log)
         self.btn_log_toggle.pack(side="left")
-        self.txt_log = ctk.CTkTextbox(lg, height=170, font=("Consolas", 11),
+        self.txt_log = ctk.CTkTextbox(lg, height=40, font=("Consolas", 11),
                                       fg_color=C_FIELD, border_width=1,
                                       border_color=C_BORDER, wrap="none")
         self.txt_log.configure(state="disabled")
+        # 新行渐隐高亮 tag（D5）：插入后 ≤200ms 移除背景
+        self.txt_log.tag_configure("flash", background="#fff3cd")
         # 默认不打包日志区，仅头部行
         # 警告行（解析告警）挂在日志折叠条下方
         self.lbl_warn = ctk.CTkLabel(self, text="", font=F_SMALL, text_color=C_ORG,
@@ -1246,13 +1249,53 @@ class ControlGUI(ctk.CTk):
 
     # ---- 日志 ----
     def toggle_log(self):
+        """展开/折叠日志面板：动效开时高度 40↔170 平滑过渡（D5，动效 4/5）。
+
+        连点防重入：先 cancel 在途过渡动画再反向续跑；折叠的 pack_forget
+        必须在高度动画完成后执行（闪烁防护）；动效关时瞬时切换。
+        """
         self._log_open.set(not self._log_open.get())
+        if self._log_anim_id > 0:
+            self.anim.cancel(self._log_anim_id)
+            self._log_anim_id = -1
         if self._log_open.get():
             self.btn_log_toggle.configure(text=t("log.expanded"), text_color=C_TXT)
             self.txt_log.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+            if not self._motion_on():
+                self.txt_log.configure(height=170)
+                return
+            self.txt_log.configure(height=40)
+
+            def _open_frame(p):
+                t = ease_out_cubic(p, 1)
+                self.txt_log.configure(height=int(40 + (170 - 40) * t))
+
+            def _open_done():
+                self._log_anim_id = -1
+                self.txt_log.configure(height=170)
+
+            self._log_anim_id = self.anim.animate(_open_frame, 180, on_done=_open_done)
+            if self._log_anim_id <= 0:  # 瞬时/降级：on_done 已同步执行
+                self._log_anim_id = -1
         else:
             self.btn_log_toggle.configure(text=t("log.collapsed"), text_color=C_MUT)
-            self.txt_log.pack_forget()
+            if not self._motion_on():
+                self.txt_log.configure(height=40)
+                self.txt_log.pack_forget()
+                return
+
+            def _close_frame(p):
+                t = ease_in_cubic(p, 1)
+                self.txt_log.configure(height=int(170 - (170 - 40) * t))
+
+            def _close_done():
+                self._log_anim_id = -1
+                self.txt_log.configure(height=40)
+                self.txt_log.pack_forget()  # 动画完成后才移除，避免闪烁
+
+            self._log_anim_id = self.anim.animate(_close_frame, 140, on_done=_close_done)
+            if self._log_anim_id <= 0:  # 瞬时/降级：on_done 已同步执行
+                self._log_anim_id = -1
 
     def _log_line(self, text):
         """主线程专用：直接写日志控件。worker 线程一律经 _log_q.put。"""
@@ -1304,17 +1347,37 @@ class ControlGUI(ctk.CTk):
         self.after(1500, self._poll_log)
 
     def _append_log_lines(self, data):
-        """增量渲染：只把文件尾部新增行追加进日志框，超 500 行裁剪头部。"""
+        """增量渲染：只把文件尾部新增行追加进日志框，超 500 行裁剪头部。
+
+        新行渐隐高亮（D5，动效 ≤200ms）：插入前记 mark 起点（随编辑自动调整），
+        插入后 flash tag 打到起点→结尾，200ms 后移除背景；动效关或单批 >200 行
+        时跳过，不打断现有增量渲染逻辑。
+        """
         new_lines = data.splitlines()
         if not new_lines:
             return
+        start = None
+        if self._motion_on() and len(new_lines) <= 200:
+            self.txt_log.configure(state="normal")
+            self.txt_log.mark_set("flash_start", "end-1c")
+            start = self.txt_log.index("flash_start")
         self.txt_log.configure(state="normal")
         for ln in new_lines:
             self.txt_log.insert("end", ln + "\n")
+        if start is not None:
+            self.txt_log.tag_add("flash", "flash_start", "end-1c")
+            self.txt_log.after(200, self._clear_flash_tag)
         if int(self.txt_log.index("end-1c").split(".")[0]) > 500:
             self.txt_log.delete("1.0", "501.0")
         self.txt_log.see("end")
         self.txt_log.configure(state="disabled")
+
+    def _clear_flash_tag(self):
+        """新行渐隐收尾：移除 flash 背景 tag（控件销毁后调用会抛 TclError，吞掉）。"""
+        try:
+            self.txt_log.tag_delete("flash")
+        except Exception:  # noqa: BLE001 - 控件已销毁/重建时无需处理
+            pass
 
     def _log_path(self):
         """日志路径：优先 AppDirectory 推导（T4），失败回退硬编码 ERR_LOG。"""
@@ -1444,6 +1507,7 @@ class ControlGUI(ctk.CTk):
         self.val_labels.clear()
         # 状态圆点动效复位：新控件未知，取消在途动画并重置全部 id/守卫
         self.anim.cancel_all()
+        self._log_anim_id = -1
         self._breathing = False
         self._breath_id = -1
         self._flash_id = -1
