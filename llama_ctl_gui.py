@@ -37,11 +37,9 @@ from strings import t, fmt
 # ---------------------------------------------------------------------------
 # 配置（本机固定事实）
 # ---------------------------------------------------------------------------
-APP_DIR = r"F:\llama.cpp"
 # 日志路径无法从 exe 参数读出；默认指向 AppDirectory 下的 server.err，
 # 若服务实际重定向到别处，可在下方 ERR_LOG 覆盖。
 ERR_LOG = r"F:\llama.cpp\server.err"
-GPU_COUNT = 1  # 本机 RTX 4090 x1；多卡时调大或改自动探测
 # 预设文件：存命名参数组合（含全部字段 values），独立于具体服务。
 # 统一固定到 F:\llama_ctl\presets.json：exe 在 dist\ 下运行也读写同一份，
 # 避免「exe 换目录/升级后预设丢失」与双副本分裂。
@@ -530,7 +528,6 @@ class ControlGUI(ctk.CTk):
         else:
             self._btn(prow, t("preset.delete"), self.delete_preset, kind="danger")
         self.refresh_presets()
-        self.refresh_presets()
 
         # 参数区（滚动卡片，占最大纵向空间）
         pcfr = ctk.CTkFrame(self, fg_color=C_CARD, corner_radius=14,
@@ -733,7 +730,16 @@ class ControlGUI(ctk.CTk):
 
     # ---- 状态刷新 ----
     def on_service_change(self):
-        self.service = self.service_var.get()
+        """切换服务：若有未应用更改，先确认（可自动备份为预设）。"""
+        new_name = self.service_var.get()
+        if new_name != self.service and self._dirty():
+            if messagebox.askyesno(t("mb.confirm"), fmt("msg.svc.dirty", n=new_name)):
+                values, _ = self._collect()
+                presets = load_presets()
+                presets[fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M:%S'))] = values
+                save_presets(presets)
+                self.refresh_presets()
+        self.service = new_name
         self.refresh_all()
 
     def refresh_all(self):
@@ -763,7 +769,7 @@ class ControlGUI(ctk.CTk):
                 text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
                 text_color=C_ACC if ok else C_RED)
         else:
-            self.lbl_health.configure(text="探活 未运行", text_color=C_GRAY)
+            self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
 
     # ---- 参数读写 ----
     def _apply_values(self, values, warnings=None):
@@ -934,8 +940,10 @@ class ControlGUI(ctk.CTk):
         self.after(0, self.refresh_status)
 
     def apply_auto(self):
-        """下拉即选即应用（无成功弹窗，失败才提示）。"""
+        """下拉即选即应用（先确认；无成功弹窗，失败才提示）。"""
         mode = {t("boot.auto"): "auto", t("boot.manual"): "manual", t("boot.disabled"): "disabled"}.get(self.auto_var.get(), "manual")
+        if not messagebox.askyesno(t("mb.confirm"), fmt("msg.auto.confirm", m=self.auto_var.get())):
+            return
         ok, out = set_start_mode(self.service, mode)
         if not ok:
             messagebox.showerror(t("mb.fail"), fmt("msg.auto.fail", o=out))
@@ -999,7 +1007,7 @@ class ControlGUI(ctk.CTk):
                 text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
                 text_color=C_ACC if ok else C_RED)
         else:
-            self.lbl_health.configure(text="探活 未运行", text_color=C_GRAY)
+            self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
         self.lbl_state.configure(text=fmt("status.svc", st=state),
                                  text_color=self._state_color(state))
         self.after(3000, self._poll_health)
