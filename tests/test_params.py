@@ -111,11 +111,17 @@ def test_split_args_handles_quoted_json():
 
 
 def test_full_roundtrip_stable():
-    text = r'--model "F:\AI_Model\Qwen3.8-27B-CRACK-Q4_K_M.gguf" --ctx-size 131072 --cache-type-k q8_0 --jinja'
+    # 含空格目录 + 反斜杠的真实路径：T1/T2 修复后必须真正无损（不再“错误自洽”）
+    path = 'C:\\Models\\My Model\\qwen.gguf'  # 单反斜杠路径
+    text = '--model "%s" --ctx-size 131072 --cache-type-k q8_0 --jinja' % path
     vals, extras, _ = parse_params(text, F)
+    assert vals["model"] == path  # 解析侧反斜杠无损
     rebuilt = build_params(vals, extras, F)
+    assert 'My Model' in rebuilt  # 空格目录保留
+    assert path.replace("\\", "\\\\") in rebuilt  # 转义形式：完整路径在重建文本中
     v2, e2, _ = parse_params(rebuilt, F)
-    assert v2 == vals and e2 == extras
+    assert v2 == vals and e2 == extras  # 二次解析稳定
+    assert v2["model"] == path  # 单反斜杠真正无损往返
 
 
 def _neg_fields():
@@ -152,6 +158,38 @@ def test_split_args_preserves_backslash_paths():
     assert split_args('"F:\\AI_Model\\Qwen.gguf"') == ['F:\\AI_Model\\Qwen.gguf']
     assert split_args('--model "C:\\Models\\My Model\\qwen.gguf"') == \
         ['--model', 'C:\\Models\\My Model\\qwen.gguf']
+
+
+def test_mixed_escaped_quote_and_literal_backslashes():
+    # 引号内 \" 转义 + 非引号反斜杠字面量混合（T3 边界）
+    text = '--prompt "say \\"hi\\" C:\\tmp\\note" --ctx-size 8192'
+    toks = split_args(text)
+    assert toks[1] == 'say "hi" C:\\tmp\\note'
+
+
+def test_negative_seed_full_roundtrip_three_pass():
+    # 负整数 seed：parse→build→parse 三次稳定（T3 边界）
+    N = _neg_fields()
+    text = "-s -1"
+    vals, extras, _ = parse_params(text, N)
+    assert vals["seed"] == "-1" and extras == []
+    r1 = build_params(vals, extras, N)
+    v2, e2, _ = parse_params(r1, N)
+    assert v2 == vals and e2 == extras
+    r2 = build_params(v2, e2, N)
+    v3, e3, _ = parse_params(r2, N)
+    assert v3 == vals and e3 == extras
+
+
+def test_unterminated_quote_and_empty_input_no_crash():
+    # 未闭合引号：吞到串尾不抛异常；空串 → []；None → 全默认（T3 边界）
+    assert split_args('"abc') == ['abc']
+    assert split_args('--model "unclosed') == ['--model', 'unclosed']
+    assert split_args("") == []
+    vals, extras, warns = parse_params(None, F)
+    assert vals["ctx_size"] == "131072" and extras == [] and warns == []
+    vals2, extras2, warns2 = parse_params("", F)
+    assert vals2 == vals and extras2 == [] and warns2 == []
 
 
 def test_quoted_path_roundtrip():
