@@ -510,8 +510,10 @@ class ControlGUI(ctk.CTk):
         self.opt_auto.pack(side="left")
         act = ctk.CTkFrame(row, fg_color="transparent")
         act.pack(side="right")
-        self._btn(act, t("btn.start"), lambda: self.do_action("start")).pack(side="left", padx=3)
-        self._btn(act, t("btn.stop"), lambda: self.do_action("stop"), kind="danger").pack(side="left", padx=3)
+        self.btn_start = self._btn(act, t("btn.start"), lambda: self.do_action("start"))
+        self.btn_start.pack(side="left", padx=3)
+        self.btn_stop = self._btn(act, t("btn.stop"), lambda: self.do_action("stop"), kind="danger")
+        self.btn_stop.pack(side="left", padx=3)
         self._btn(act, t("btn.restart"), self.do_restart).pack(side="left", padx=3)
         self._btn(act, t("btn.settings"), self.open_settings).pack(side="left", padx=(18, 3))
 
@@ -522,7 +524,8 @@ class ControlGUI(ctk.CTk):
         ctk.CTkLabel(prow, text=t("card.presets"), font=F_GROUP, text_color=C_MUT).pack(side="left")
         self.lbl_dirty = ctk.CTkLabel(prow, text="", font=F_SMALL, text_color=C_ORG)
         self.lbl_dirty.pack(side="left", padx=12)
-        self._btn(prow, t("btn.revert"), self.load_params).pack(side="right")
+        self.btn_revert = self._btn(prow, t("btn.revert"), self.load_params)
+        self.btn_revert.pack(side="right")
         self._btn(prow, t("btn.apply2"), self.apply_changes, kind="primary").pack(side="right", padx=(0, 8))
         base = _resource_dir()
         try:
@@ -1070,12 +1073,24 @@ class ControlGUI(ctk.CTk):
     def _poll_health(self):
         if self._stop_poll:
             return
-        # 未应用更改提示（表单 != 服务）
+        # 未应用更改提示 + 启停/还原按钮联动（异常时保持按钮原状）
         try:
-            self.lbl_dirty.configure(text="● 有未应用的更改" if self._dirty() else "")
+            dirty = self._dirty()
+            self.lbl_dirty.configure(text="● 有未应用的更改" if dirty else "")
+            self.btn_revert.configure(state="normal" if dirty else "disabled")
         except Exception:  # noqa: BLE001
             pass
         state = sc_query_state(self.service)
+        # 服务状态 → 启停按钮禁用联动（过渡态双禁，防误操作）
+        if state == "RUNNING":
+            self.btn_start.configure(state="disabled")
+            self.btn_stop.configure(state="normal")
+        elif state == "STOPPED":
+            self.btn_start.configure(state="normal")
+            self.btn_stop.configure(state="disabled")
+        else:
+            self.btn_start.configure(state="disabled")
+            self.btn_stop.configure(state="disabled")
         if state == "RUNNING":
             ok, detail = check_health(self.var["host"].get().strip() or "127.0.0.1",
                                       self.var["port"].get().strip() or "8080")
