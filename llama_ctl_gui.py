@@ -32,6 +32,7 @@ from nssm_adapter import (
 )
 from params import parse_params, build_params
 from settings import load_settings, save_settings
+from motion import Animator
 import strings
 from strings import t, fmt
 
@@ -437,6 +438,9 @@ class ControlGUI(ctk.CTk):
         self.val_labels = {}
         self._stop_poll = False
         self._log_q = queue.Queue()
+        # 动效引擎：注入 Tk after 作调度器（motion.py 纯数值模块）；
+        # 必须在 _build_widgets 之前创建，D4 起的 hover 绑定会用到。
+        self.anim = Animator(schedule=lambda fn, ms: self.after(ms, fn))
         self._restarting = False
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
 
@@ -1105,6 +1109,7 @@ class ControlGUI(ctk.CTk):
 
     def _on_close(self):
         self._stop_poll = True
+        self.anim.cancel_all()  # 停掉全部在途动画，帧回调发现不在注册表即自停
         try:
             self.settings["geometry"] = self.geometry()
             self.settings["last_preset"] = self.preset_var.get().strip()
@@ -1113,11 +1118,15 @@ class ControlGUI(ctk.CTk):
             pass
         self.destroy()
 
+    def _motion_on(self):
+        """动效总开关（design-guide §五）：关闭后 D3-D7 所有动画直跳终态。"""
+        return bool(self.settings.get("motion_enabled", True))
+
     # ---- 设置窗口 ----
     def open_settings(self):
         win = ctk.CTkToplevel(self)
         win.title(t("settings.title"))
-        win.geometry("420x260")
+        win.geometry("420x320")
         win.transient(self)
         win.grab_set()
         self._settings_win = win
@@ -1142,6 +1151,15 @@ class ControlGUI(ctk.CTk):
                                          t("appear.system")))
         appear_menu.pack(anchor="w", padx=20)
 
+        # 动效总开关（即时生效，无需 _restart_ui）
+        self._motion_var = tk.BooleanVar(value=self.settings.get("motion_enabled", True))
+        motion_cb = ctk.CTkCheckBox(
+            win, text=t("settings.motion"), variable=self._motion_var,
+            font=F_BODY, text_color=C_TXT, fg_color=C_ACC,
+            hover_color=C_ACCH, border_color=C_BORDER, corner_radius=6,
+            command=self._change_motion)
+        motion_cb.pack(anchor="w", padx=20, pady=(16, 4))
+
         ctk.CTkLabel(win, text=t("settings.note"), font=F_SMALL, text_color=C_MUT,
                      wraplength=360, justify="left").pack(fill="x", padx=20, pady=(16, 0))
         self._btn(win, t("settings.close"), win.destroy).pack(pady=(14, 12))
@@ -1158,6 +1176,11 @@ class ControlGUI(ctk.CTk):
         ctk.set_appearance_mode({"system": "system", "light": "light",
                                  "dark": "dark"}[mode])
         self._restart_ui()
+
+    def _change_motion(self):
+        """动效开关回调：写设置并落盘，即时生效，不重启 UI。"""
+        self.settings["motion_enabled"] = bool(self._motion_var.get())
+        save_settings(self.settings)
 
     def _restart_ui(self):
         """销毁并按新语言/调色板重建全部部件（设置即时生效）。"""

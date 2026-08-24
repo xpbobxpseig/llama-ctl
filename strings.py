@@ -56,6 +56,7 @@ STRINGS = {
     "settings.title":   {"zh": "设置", "en": "Settings"},
     "settings.lang":    {"zh": "界面语言（参数详解保持中文）", "en": "UI language (parameter guides stay Chinese)"},
     "settings.appear":  {"zh": "外观", "en": "Appearance"},
+    "settings.motion":  {"zh": "动效（关闭后所有动画直跳终态）", "en": "Motion (off = instant, no animation)"},
     "appear.system":    {"zh": "跟随系统", "en": "System"},
     "appear.light":     {"zh": "浅色", "en": "Light"},
     "appear.dark":      {"zh": "深色", "en": "Dark"},
