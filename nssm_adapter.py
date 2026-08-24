@@ -124,7 +124,7 @@ def list_nssm_services():
     try:
         out = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command",
-             'Get-WmiObject Win32_Service | Where-Object { $_.PathName -like "*nssm*" } | ForEach-Object { $_.Name }'],
+             'Get-CimInstance Win32_Service | Where-Object { $_.PathName -like "*nssm*" } | ForEach-Object { $_.Name }'],
             capture_output=True, text=True, timeout=20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         ).stdout

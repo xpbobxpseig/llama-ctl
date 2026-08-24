@@ -28,7 +28,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from nssm_adapter import (
     NSSM_EXE, DEFAULT_SERVICE, get_app_parameters, set_app_parameters,
     get_start_mode, set_start_mode, sc_query_state, sc_action,
-    list_nssm_services, check_health,
+    list_nssm_services, check_health, app_directory,
 )
 from params import parse_params, build_params
 from settings import load_settings, save_settings
@@ -38,8 +38,8 @@ from strings import t, fmt
 # ---------------------------------------------------------------------------
 # 配置（本机固定事实）
 # ---------------------------------------------------------------------------
-# 日志路径无法从 exe 参数读出；默认指向 AppDirectory 下的 server.err，
-# 若服务实际重定向到别处，可在下方 ERR_LOG 覆盖。
+# 日志路径优先从 NSSM AppDirectory 推导（_log_path，T4 起）；
+# ERR_LOG 仅作推导失败时的回退（如 nssm 不可用或 AppDirectory 未配置）。
 ERR_LOG = r"F:\llama.cpp\server.err"
 # 预设文件：存命名参数组合（含全部字段 values），独立于具体服务。
 # 统一固定到 F:\llama_ctl\presets.json：exe 在 dist\ 下运行也读写同一份，
@@ -425,6 +425,7 @@ class ControlGUI(ctk.CTk):
         self._stop_poll = False
         self._log_q = queue.Queue()
         self._restarting = False
+        self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
 
         self._build_widgets()
         self.refresh_all()
@@ -835,7 +836,7 @@ class ControlGUI(ctk.CTk):
         """下拉选择：若表单有未应用更改，先把当前表单自动存为新预设，再载入所选。"""
         if self._dirty():
             cur = self.preset_var.get().strip()
-            cur_name = cur if (cur and cur != name) else fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M'))
+            cur_name = cur if (cur and cur != name) else fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M:%S'))
             values, _ = self._collect()
             presets = load_presets()
             presets[cur_name] = values
@@ -1017,24 +1018,42 @@ class ControlGUI(ctk.CTk):
         if self._stop_poll:
             return
         try:
-            if os.path.exists(ERR_LOG):
-                with open(ERR_LOG, "rb") as fh:
+            log_path = self._log_path()
+            if log_path and os.path.exists(log_path):
+                with open(log_path, "rb") as fh:
                     fh.seek(0, 2)
                     size = fh.tell()
-                    fh.seek(max(0, size - 4000))
-                    data = fh.read().decode("utf-8", "replace")
-                lines = data.splitlines()[-25:]
-                cur = self.txt_log.get("1.0", "end").strip()
-                new = "\n".join(lines)
-                if cur != new:
-                    self.txt_log.configure(state="normal")
-                    self.txt_log.delete("1.0", "end")
-                    self.txt_log.insert("end", new)
-                    self.txt_log.see("end")
-                    self.txt_log.configure(state="disabled")
+                    if size < self._log_off:
+                        self._log_off = 0  # 文件被截断/轮转，从头读尾部
+                    if size > self._log_off:
+                        fh.seek(self._log_off)
+                        data = fh.read().decode("utf-8", "replace")
+                        self._log_off = size
+                        self._append_log_lines(data)
         except Exception:  # noqa: BLE001
             pass
         self.after(1500, self._poll_log)
+
+    def _append_log_lines(self, data):
+        """增量渲染：只把文件尾部新增行追加进日志框，超 500 行裁剪头部。"""
+        new_lines = data.splitlines()
+        if not new_lines:
+            return
+        self.txt_log.configure(state="normal")
+        for ln in new_lines:
+            self.txt_log.insert("end", ln + "\n")
+        if int(self.txt_log.index("end-1c").split(".")[0]) > 500:
+            self.txt_log.delete("1.0", "501.0")
+        self.txt_log.see("end")
+        self.txt_log.configure(state="disabled")
+
+    def _log_path(self):
+        """日志路径：优先 AppDirectory 推导（T4），失败回退硬编码 ERR_LOG。"""
+        try:
+            d = app_directory(self.service)
+            return os.path.join(d, "server.err") if d else ERR_LOG
+        except Exception:  # noqa: BLE001
+            return ERR_LOG
 
     def _poll_health(self):
         if self._stop_poll:

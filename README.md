@@ -48,7 +48,7 @@ python llama_ctl_gui.py
 ## 修复 / 通用化处理
 
 - 原 NSSM 参数含冲突：`-c 4096 --ctx-size 131072`（`-c` 是 `--ctx-size` 别名）。读取弹红色告警并保留最后一项（`131072`），写回统一为单一 `--ctx-size`。
-- 服务名通用：通过 `powershell Get-WmiObject` 列出本机所有 NSSM 服务，顶部下拉切换；不再硬编码 QwenLLM。
+- 服务名通用：通过 `powershell Get-CimInstance` 列出本机所有 NSSM 服务，顶部下拉切换；不再硬编码 QwenLLM。
 - 滑块型字段若原参数缺失，自动回填 `default`（范围由 FIELDS 定义），不输出越界值。
 - 负数值参数（如随机种子 `-1`）正确解析为值而非选项 flag（pytest 覆盖）。
 - 引号内反斜杠路径（如 `"F:\AI_Model\Qwen.gguf"`）按 Windows 引号规则保留字面量，不再被吞字符（pytest 覆盖）。
