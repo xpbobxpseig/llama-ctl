@@ -371,34 +371,57 @@ F_GROUP = ("Microsoft YaHei UI", 12, "bold")
 
 
 class _HelpTip:
-    """问号按钮 hover 提示：鼠标指到即显示，移开即隐藏，无需点击或关闭。"""
+    """问号按钮 hover 提示（D7 延迟 hover）：悬停 300ms 后才出现，移开即取消。
+
+    快速扫过不出提示；这是交互延迟不是动效，不受 motion_enabled 开关影响。
+    """
     def __init__(self, widget, text_fn):
         self.widget = widget
         self.text_fn = text_fn          # 延迟取值，内容始终最新
         self.win = None
-        widget.bind("<Enter>", self._show)
-        widget.bind("<Leave>", self._hide)
+        self._after_id = None           # 延迟显示计时器 token
+        widget.bind("<Enter>", self._enter)
+        widget.bind("<Leave>", self._leave)
         widget.bind("<Button-1>", self._hide)   # 万一点击也立即收起
 
-    def _show(self, _=None):
+    def _enter(self, _=None):
         if self.win is not None:
-            return
-        text = self.text_fn()
-        if not text:
-            return
-        win = tk.Toplevel(self.widget)
-        win.overrideredirect(True)
-        win.wm_attributes("-topmost", True)
-        fr = ctk.CTkFrame(win, fg_color=C_TIP, corner_radius=10,
-                          border_width=1, border_color=C_BORDER)
-        fr.pack(padx=0, pady=0)
-        ctk.CTkLabel(fr, text=text, font=F_SMALL, text_color=C_TXT,
-                     justify="left", anchor="w", wraplength=420,
-                     padx=12, pady=8).pack()
-        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 6
-        y = self.widget.winfo_rooty()
-        win.geometry(f"+{x}+{y}")
-        self.win = win
+            return  # 已显示不重复调度
+        if self._after_id is None:
+            self._after_id = self.widget.after(300, self._show)
+
+    def _leave(self, _=None):
+        if self._after_id is not None:
+            try:
+                self.widget.after_cancel(self._after_id)
+            except Exception:  # noqa: BLE001 - 控件销毁后 token 已失效
+                pass
+            self._after_id = None
+        self._hide()
+
+    def _show(self, _=None):
+        self._after_id = None  # 定时器已触发
+        try:
+            if self.win is not None:
+                return
+            text = self.text_fn()
+            if not text:
+                return
+            win = tk.Toplevel(self.widget)
+            win.overrideredirect(True)
+            win.wm_attributes("-topmost", True)
+            fr = ctk.CTkFrame(win, fg_color=C_TIP, corner_radius=10,
+                              border_width=1, border_color=C_BORDER)
+            fr.pack(padx=0, pady=0)
+            ctk.CTkLabel(fr, text=text, font=F_SMALL, text_color=C_TXT,
+                         justify="left", anchor="w", wraplength=420,
+                         padx=12, pady=8).pack()
+            x = self.widget.winfo_rootx() + self.widget.winfo_width() + 6
+            y = self.widget.winfo_rooty()
+            win.geometry(f"+{x}+{y}")
+            self.win = win
+        except Exception:  # noqa: BLE001 - 定时器晚到且控件已销毁（UI 重建）时静默放弃
+            pass
 
     def _hide(self, _=None):
         if self.win is not None:
@@ -450,7 +473,9 @@ class ControlGUI(ctk.CTk):
         self._flash_id = -1          # 当前闪烁动画 id（-1 = 无）
         self._flash_armed = True     # FAIL 只闪一次，恢复 OK 后重新武装
         self._log_anim_id = -1       # 日志面板高度过渡动画 id（-1 = 无）
-        self._restarting = False
+        # D7 字段改动高亮：每字段恢复色 after token；_suppress_trace 屏蔽程序化填值
+        self._field_flash_after = {}  # key -> after token（快速连改重置计时器）
+        self._suppress_trace = False  # load_params/预设载入等程序化 set 期间屏蔽 trace
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
 
         self._build_widgets()
@@ -733,10 +758,12 @@ class ControlGUI(ctk.CTk):
 
         v = tk.StringVar()
         self.var[key] = v
+        self._hook_trace(key, v)
 
         if fld["kind"] == "slider":
             iv = tk.DoubleVar()
             self.var[key] = iv
+            self._hook_trace(key, iv)
             ctk.CTkLabel(parent, text=fld["label"], font=F_BODY, text_color=C_TXT,
                          anchor="w").grid(row=row, column=1, sticky="w", padx=2)
             n_steps = max(int(round((fld["max"] - fld["min"]) / fld["step"])), 1)
@@ -773,6 +800,7 @@ class ControlGUI(ctk.CTk):
                          anchor="w").grid(row=row, column=1, sticky="w", padx=2)
             cv = tk.StringVar()
             self.var[key] = cv
+            self._hook_trace(key, cv)
             opts = [o if o else "（空）" for o in fld["options"]]
             w = ctk.CTkOptionMenu(parent, variable=cv, values=opts, width=220,
                                   font=F_BODY, fg_color=C_FIELD, button_color=C_BORDER,
@@ -815,6 +843,66 @@ class ControlGUI(ctk.CTk):
         self.widgets[key] = w
         return row + 1
 
+    def _hook_trace(self, key, var):
+        """字段变量 write trace：改动即高亮该控件 1s（D7）。
+
+        程序化填值（load_params/预设载入/快键/snap）期间 _suppress_trace=True
+        时直接 return，防启动加载全屏闪。
+        """
+        def _on_write(*_):
+            if self._suppress_trace:
+                return
+            self._flash_field(key)
+
+        var.trace_add("write", _on_write)
+
+    def _flash_field(self, key):
+        """字段控件高亮 1s：边框/按钮色闪强调蓝后恢复（快速连改重置计时器）。
+
+        动效关时跳过（D2 契约：动画直跳终态 = 不闪）。
+        各控件着色能力不同：slider 用 button_color；entry 用 border_color；
+        checkbox 用 border_color；combo（CTkOptionMenu 无 border_color 参数）
+        退化为 button_color 闪（try/except 吞 TypeError）。
+        """
+        if not self._motion_on():
+            return
+        w = self.widgets.get(key)
+        if w is None:
+            return
+        old = self._field_flash_after.pop(key, None)
+        if old:
+            try:
+                self.after_cancel(old)  # 快速连改：重置恢复计时器
+            except Exception:  # noqa: BLE001
+                pass
+        # 先恢复基准色，再瞬时闪强调蓝（连续改动时从强调色直接重闪）
+        self._restore_field_color(key)
+        try:
+            w.configure(border_color=C_ACC)
+        except Exception:  # noqa: BLE001 - combo 无 border_color 参数，退化用 button_color
+            try:
+                w.configure(button_color=C_ACC)
+            except Exception:  # noqa: BLE001 - 不支持的控件静默跳过
+                return
+        self._field_flash_after[key] = self.after(1000, lambda k=key: self._restore_field_color(k))
+
+    def _restore_field_color(self, key):
+        """恢复字段控件基准色（slider 保持原生蓝按钮、其余回主题色）。"""
+        w = self.widgets.get(key)
+        if w is None:
+            return
+        fld = next((f for f in FIELDS if f["key"] == key), None)
+        try:
+            if fld and fld["kind"] == "slider":
+                w.configure(button_color=C_ACC)
+            else:
+                w.configure(border_color=C_BORDER)
+        except Exception:  # noqa: BLE001 - combo 无 border_color，button_color 恢复
+            try:
+                w.configure(button_color=C_BORDER)
+            except Exception:  # noqa: BLE001
+                pass
+
     def _fmt_ctx(self, num):
         if num >= 1048576:
             return f"{num // 1048576}M"
@@ -823,10 +911,16 @@ class ControlGUI(ctk.CTk):
         return f"{num:g}"
 
     def _set_ctx(self, key, val):
+        """快捷档位：程序化 set（D7 屏蔽 trace），但随后手动闪一次给用户反馈。"""
         fld = next(f for f in FIELDS if f["key"] == key)
-        self.var[key].set(float(val))
+        self._suppress_trace = True
+        try:
+            self.var[key].set(float(val))
+        finally:
+            self._suppress_trace = False
         self.widgets[key].set(float(val))
         self.val_labels[key].configure(text=f"{val:g} {fld.get('unit', '')}".strip())
+        self._flash_field(key)
 
     def _on_slide(self, key, val):
         fld = next(f for f in FIELDS if f["key"] == key)
@@ -835,7 +929,11 @@ class ControlGUI(ctk.CTk):
             for s in fld["snap"]:
                 if abs(num - s) <= fld["step"] * 1.5:
                     num = s
-                    self.var[key].set(num)
+                    self._suppress_trace = True  # snap 程序化回写不触发第二次高亮
+                    try:
+                        self.var[key].set(num)
+                    finally:
+                        self._suppress_trace = False
                     break
         unit = fld.get("unit", "")
         self.val_labels[key].configure(text=f"{num:g} {unit}".strip())
@@ -847,7 +945,11 @@ class ControlGUI(ctk.CTk):
         hint = fld.get("option_help", {}).get(real, "")
         self.lbl_hint.configure(text=f"[{fld['label']}] {hint}" if hint else "")
         if real != shown:
-            self.var[key].set(real)
+            self._suppress_trace = True  # 显示名归一化（（空）→""）不触发高亮
+            try:
+                self.var[key].set(real)
+            finally:
+                self._suppress_trace = False
 
     def _help_text(self, key):
         fld = next(f for f in FIELDS if f["key"] == key)
@@ -1006,20 +1108,28 @@ class ControlGUI(ctk.CTk):
 
     # ---- 参数读写 ----
     def _apply_values(self, values, warnings=None):
-        """字段字典填入表单（滑块/下拉/复选/文本通用）。"""
+        """字段字典填入表单（滑块/下拉/复选/文本通用）。
+
+        程序化填值（load_params/预设载入均经此入口）：_suppress_trace 屏蔽
+        字段高亮 trace，防启动加载全屏闪（D7）。
+        """
         self.values = dict(values)
-        for fld in FIELDS:
-            key = fld["key"]
-            val = values.get(key, "")
-            if fld["kind"] == "slider":
-                try:
-                    num = float(val)
-                except (ValueError, TypeError):
-                    num = float(fld.get("default", fld["min"]))
-                self.var[key].set(num)
-                self.val_labels[key].configure(text=f"{num:g} {fld.get('unit','')}".strip())
-            else:
-                self.var[key].set(val)
+        self._suppress_trace = True
+        try:
+            for fld in FIELDS:
+                key = fld["key"]
+                val = values.get(key, "")
+                if fld["kind"] == "slider":
+                    try:
+                        num = float(val)
+                    except (ValueError, TypeError):
+                        num = float(fld.get("default", fld["min"]))
+                    self.var[key].set(num)
+                    self.val_labels[key].configure(text=f"{num:g} {fld.get('unit','')}".strip())
+                else:
+                    self.var[key].set(val)
+        finally:
+            self._suppress_trace = False
         if warnings is not None:
             self.lbl_warn.configure(text=" | ".join(warnings) if warnings else "")
 
@@ -1425,6 +1535,13 @@ class ControlGUI(ctk.CTk):
     def _on_close(self):
         self._stop_poll = True
         self.anim.cancel_all()  # 停掉全部在途动画，帧回调发现不在注册表即自停
+        # 取消全部字段高亮恢复计时器（D7：无泄漏 after）
+        for _k, tok in list(self._field_flash_after.items()):
+            try:
+                self.after_cancel(tok)
+            except Exception:  # noqa: BLE001
+                pass
+        self._field_flash_after.clear()
         try:
             self.settings["geometry"] = self.geometry()
             self.settings["last_preset"] = self.preset_var.get().strip()
@@ -1508,6 +1625,9 @@ class ControlGUI(ctk.CTk):
         # 状态圆点动效复位：新控件未知，取消在途动画并重置全部 id/守卫
         self.anim.cancel_all()
         self._log_anim_id = -1
+        # 字段高亮计时器全部失效（旧控件已销毁），清空即可（D7）
+        self._field_flash_after.clear()
+        self._suppress_trace = False
         self._breathing = False
         self._breath_id = -1
         self._flash_id = -1
