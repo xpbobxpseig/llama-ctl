@@ -476,6 +476,8 @@ class ControlGUI(ctk.CTk):
         # D7 字段改动高亮：每字段恢复色 after token；_suppress_trace 屏蔽程序化填值
         self._field_flash_after = {}  # key -> after token（快速连改重置计时器）
         self._suppress_trace = False  # load_params/预设载入等程序化 set 期间屏蔽 trace
+        # D8 折叠分组：展开状态（_restart_ui 重建后保留，默认仅第一组展开）
+        self.group_open = {}
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
 
         self._build_widgets()
@@ -703,21 +705,44 @@ class ControlGUI(ctk.CTk):
                                              scrollbar_button_hover_color=C_GRAY)
         self.scroll.pack(fill="both", expand=True)
         self.scroll.grid_columnconfigure(2, weight=1)
+        # D8 折叠分组：每个 group 一个可折叠区（头按钮 + 独立 grid 容器，行号各从 0 计）
+        self._group_containers = {}  # group -> 内容 CTkFrame
+        self._group_headers = {}     # group -> 头部按钮
+        groups = []
+        for fld in FIELDS:
+            g = fld.get("group")
+            if g not in groups:
+                groups.append(g)
+        self.group_open = self.group_open or {}  # 历史空字典（升级路径）
+        # 仅第一组默认展开；已存在的展开状态（跨 _restart_ui）原样保留
+        for i, g in enumerate(groups):
+            self.group_open.setdefault(g, i == 0)
+            head = ctk.CTkButton(
+                self.scroll, text=self._group_label(g), font=F_GROUP,
+                text_color=C_ACC if self.group_open[g] else C_MUT,
+                fg_color="transparent", hover_color=C_CARD,
+                anchor="w", height=30, corner_radius=6,
+                command=lambda gg=g: self._toggle_group(gg))
+            head.grid(row=len(self._group_containers) * 2, column=0,
+                      columnspan=4, sticky="ew", pady=(6, 2))
+            body = ctk.CTkFrame(self.scroll, fg_color="transparent")
+            body.grid(row=len(self._group_containers) * 2 + 1, column=0,
+                      columnspan=4, sticky="ew", padx=(10, 0))
+            body.grid_columnconfigure(2, weight=1)
+            self._group_containers[g] = body
+            self._group_headers[g] = head
+            if not self.group_open[g]:
+                body.grid_remove()
+        # 每组容器独立从 0 计数（FIELDS 按 group 连续排列）
         row_i = 0
         last_group = None
         for fld in FIELDS:
             g = fld.get("group")
             if g != last_group:
-                sep = ctk.CTkFrame(self.scroll, fg_color=C_BORDER, height=1)
-                if last_group is not None:
-                    sep.grid(row=row_i, column=0, columnspan=4, sticky="ew", pady=(10, 2))
-                    row_i += 1
-                ctk.CTkLabel(self.scroll, text=g, font=F_GROUP, text_color=C_ACC,
-                             anchor="w").grid(row=row_i, column=0, columnspan=4,
-                                              sticky="w", pady=(6, 4))
-                row_i += 1
+                row_i = 0
                 last_group = g
-            row_i = self._build_field(self.scroll, fld, row_i)
+            body = self._group_containers[g]
+            row_i = self._build_field(body, fld, row_i)
 
         # combo 选项实时解释行
         self.lbl_hint = ctk.CTkLabel(pc, text="", font=F_SMALL, text_color=C_MUT,
@@ -746,6 +771,24 @@ class ControlGUI(ctk.CTk):
         self.lbl_warn = ctk.CTkLabel(self, text="", font=F_SMALL, text_color=C_ORG,
                                      anchor="w", wraplength=900, justify="left")
         self.lbl_warn.pack(fill="x", padx=16, pady=(2, 8))
+
+    def _group_label(self, group):
+        """组头文案：组名 + 展开指示（▾ 展开 / ▸ 收起）。"""
+        indicator = chr(0x25BE) if self.group_open.get(group, False) else chr(0x25B8)
+        return f"{group} {indicator}"
+
+    def _toggle_group(self, group):
+        """点击组头切换展开/收起（D8）。瞬时切换优先正确性；状态写入
+        self.group_open 供 _restart_ui 重建后恢复。"""
+        self.group_open[group] = not self.group_open.get(group, False)
+        head = self._group_headers[group]
+        body = self._group_containers[group]
+        head.configure(text=self._group_label(group),
+                       text_color=C_ACC if self.group_open[group] else C_MUT)
+        if self.group_open[group]:
+            body.grid()
+        else:
+            body.grid_remove()
 
     def _build_field(self, parent, fld, row):
         key = fld["key"]
@@ -1628,6 +1671,7 @@ class ControlGUI(ctk.CTk):
         # 字段高亮计时器全部失效（旧控件已销毁），清空即可（D7）
         self._field_flash_after.clear()
         self._suppress_trace = False
+        # D8 折叠分组展开状态保留（group_open 在 _build_widgets 里按存量恢复）
         self._breathing = False
         self._breath_id = -1
         self._flash_id = -1
