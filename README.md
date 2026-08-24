@@ -20,7 +20,13 @@ python llama_ctl_gui.py
 ```
 
 仅支持 Windows（依赖系统 `nssm.exe`、`sc`、`powershell`）。
-重新打包：`python -m PyInstaller --onefile --noconsole --name llama_ctl --clean llama_ctl_gui.py`
+重新打包（推荐，spec 已进版本库并配置窗口模式）：
+
+```
+python -m PyInstaller llama_ctl.spec --clean
+```
+
+产物为 `dist\llama_ctl.exe`。
 
 ## 控件说明
 

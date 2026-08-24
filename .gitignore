@@ -1,4 +1,8 @@
 build/
 dist/
 __pycache__/
-*.spec
+
+# 用户数据与原子写临时文件（不跟踪，保留在工作区）
+presets.json
+settings.json
+*.tmp

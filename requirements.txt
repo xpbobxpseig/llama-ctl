@@ -1,0 +1,7 @@
+# 运行依赖
+customtkinter>=5.2.0
+Pillow>=10.0.0
+
+# 开发依赖（打包/测试；运行时不需要）
+pytest>=8.0.0
+pyinstaller>=6.0.0
