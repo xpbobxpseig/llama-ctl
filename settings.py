@@ -3,8 +3,8 @@
 """
 settings.py — 工具偏好持久化（llama_ctl）
 
-语言/外观/窗口几何/最后预设名。与 presets.json 同模式：固定路径、原子写、
-损坏回退默认值。
+语言/外观/窗口几何/最后预设名/动效总开关。与 presets.json 同模式：固定路径、
+原子写、损坏回退默认值。
 """
 
 import json
@@ -17,6 +17,7 @@ DEFAULTS = {
     "appearance": "system",  # "system" | "light" | "dark"
     "geometry": None,        # "WxH+X+Y" 字符串，None = 系统默认
     "last_preset": "",       # 最后选中的预设名
+    "motion_enabled": True,   # 动效总开关（design-guide §五：关闭后动画直跳终态）
 }
 
 
