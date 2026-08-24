@@ -71,6 +71,15 @@ def set_app_parameters(service, text):
     return nssm_set(service, "AppParameters", text)
 
 
+def app_directory(service):
+    """返回服务的 AppDirectory，供 GUI 推导日志路径（取代硬编码）。
+
+    未配置（None / 空串）时返回 None。
+    """
+    val = nssm_get(service, "AppDirectory")
+    return val if val else None
+
+
 def get_start_mode(service):
     raw = nssm_get(service, "Start")
     if raw is None:
@@ -128,10 +137,16 @@ def list_nssm_services():
 
 
 def check_health(host, port):
-    """GET /health（旧构建为 /healthz）。返回 (ok: bool, detail: str)。"""
-    if not host or not port:
-        return False, "无 host/port"
-    base = f"http://{host}:{port}"
+    """GET /health（旧构建为 /healthz）。返回 (ok: bool, detail: str)。
+
+    host 为空或 0.0.0.0 / :: 这类通配地址时回退到 127.0.0.1
+    （Windows 上直接连 http://0.0.0.0:port 常失败）。
+    """
+    if not port:
+        return False, "无 port"
+    # 空 host / 通配地址统一回退环回地址
+    probe_host = "127.0.0.1" if (host or "") in ("", "0.0.0.0", "::") else host
+    base = f"http://{probe_host}:{port}"
     for path in ("/health", "/healthz"):
         try:
             with urlopen(base + path, timeout=3) as r:
