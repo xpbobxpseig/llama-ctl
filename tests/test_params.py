@@ -116,3 +116,23 @@ def test_full_roundtrip_stable():
     rebuilt = build_params(vals, extras, F)
     v2, e2, _ = parse_params(rebuilt, F)
     assert v2 == vals and e2 == extras
+
+
+# --- 反斜杠路径（T1 / P0-1）---
+
+def test_split_args_preserves_backslash_paths():
+    # Windows 引号规则：反斜杠只对后随 \ 或 " 起转义作用，其余保留字面量
+    assert split_args('"F:\\AI_Model\\Qwen.gguf"') == ['F:\\AI_Model\\Qwen.gguf']
+    assert split_args('--model "C:\\Models\\My Model\\qwen.gguf"') == \
+        ['--model', 'C:\\Models\\My Model\\qwen.gguf']
+
+
+def test_quoted_path_roundtrip():
+    text = '--model "C:\\Models\\My Model\\qwen.gguf" --ctx-size 131072'
+    vals, extras, _ = parse_params(text, F)
+    assert vals["model"] == 'C:\\Models\\My Model\\qwen.gguf'
+    rebuilt = build_params(vals, extras, F)
+    # build 对含空格值加引号并转义反斜杠，重建文本应包含完整路径（转义形式）
+    assert 'C:\\\\Models\\\\My Model\\\\qwen.gguf' in rebuilt
+    v2, e2, _ = parse_params(rebuilt, F)
+    assert v2 == vals and e2 == extras

@@ -26,7 +26,8 @@ def split_args(text):
         if c == '"':
             j, buf = i + 1, ""
             while j < n:
-                if text[j] == "\\" and j + 1 < n:
+                if text[j] == "\\" and j + 1 < n and text[j + 1] in ("\\", '"'):
+                    # Windows 引号规则：反斜杠仅转义后随的 \ 或 "；其他字符保留字面量
                     buf += text[j + 1]
                     j += 2
                     continue
