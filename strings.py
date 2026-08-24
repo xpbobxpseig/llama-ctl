@@ -45,6 +45,9 @@ STRINGS = {
     "log.restart.stop": {"zh": ">>> 重启 {s}：停止...", "en": ">>> Restarting {s}: stopping..."},
     "log.restart.start":{"zh": ">>> 启动...", "en": ">>> Starting..."},
     "log.restart.ready":{"zh": ">>> 服务就绪：{d}", "en": ">>> Service ready: {d}"},
+    "log.restart.unhealthy":{"zh": ">>> 当前未探活，继续重启", "en": ">>> Not healthy, restarting anyway"},
+    "log.restart.stopfail":{"zh": ">>> 停止失败，已中止重启：{m}", "en": ">>> Stop failed, restart aborted: {m}"},
+    "log.restart.stoptimeout":{"zh": ">>> 停止超时（40×0.5s 未 STOPPED），已中止重启", "en": ">>> Stop timed out, restart aborted"},
     # ---- 状态 ----
     "status.svc":       {"zh": "服务 {st}", "en": "Svc {st}"},
     "status.health.ok": {"zh": "探活 OK · {d}", "en": "Health OK · {d}"},
@@ -83,6 +86,7 @@ STRINGS = {
                          "en": "Written. Service not running; takes effect on next start."},
     "msg.sc.done":      {"zh": "sc {a} 已提交（服务 {s}）。", "en": "sc {a} submitted (service {s})."},
     "msg.sc.fail":      {"zh": "sc {a} 失败：{m}", "en": "sc {a} failed: {m}"},
+    "msg.restarting":   {"zh": "重启进行中，请稍候…", "en": "Restart in progress…"},
     "msg.write.fail":   {"zh": "写回失败：{o}", "en": "Write failed: {o}"},
     "msg.auto.fail":    {"zh": "开机自启设置失败：{o}", "en": "Auto-start change failed: {o}"},
     "msg.auto.confirm": {"zh": "将开机自启设为「{m}」？", "en": "Set auto-start to \"{m}\"?"},

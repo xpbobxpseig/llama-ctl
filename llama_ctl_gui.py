@@ -15,6 +15,7 @@ llama_ctl_gui.py — llama.cpp 服务控制台（通用版）
 
 import os
 import json
+import queue
 import re
 import subprocess
 import sys
@@ -422,6 +423,8 @@ class ControlGUI(ctk.CTk):
         self.widgets = {}
         self.val_labels = {}
         self._stop_poll = False
+        self._log_q = queue.Queue()
+        self._restarting = False
 
         self._build_widgets()
         self.refresh_all()
@@ -917,27 +920,50 @@ class ControlGUI(ctk.CTk):
         self.after(1500, self.refresh_status)
 
     def do_restart(self):
-        threading.Thread(target=self._restart_worker, daemon=True).start()
+        """启动重启工作线程（防重入：进行中再点只提示）。"""
+        if self._restarting:
+            messagebox.showinfo(t("mb.hint"), t("msg.restarting"))
+            return
+        self._restarting = True
+        # 主线程读取表单值后传入 worker；worker 内不再触碰任何 Tk 对象
+        host = self.var["host"].get().strip() or "127.0.0.1"
+        port = self.var["port"].get().strip() or "8080"
+        threading.Thread(target=self._restart_worker,
+                         args=(self.service, host, port), daemon=True).start()
 
-    def _restart_worker(self):
-        self._log_line(fmt("log.restart.stop", s=self.service))
-        sc_action("stop", self.service)
+    def _restart_worker(self, service, host, port):
+        """后台重启序列：只允许 _log_q.put 与子进程调用，禁止碰控件 / self.after。"""
+        # 停止前健康检查（只提示，不阻断——重启本身就是修复手段）
+        if not check_health(host, port)[0]:
+            self._log_q.put(t("log.restart.unhealthy"))
+        self._log_q.put(fmt("log.restart.stop", s=service))
+        ok, msg = sc_action("stop", service)
+        if not ok:
+            self._log_q.put(fmt("log.restart.stopfail", m=msg))
+            self._log_q.put("__RESTART_DONE__")
+            return
+        stopped = False
         for _ in range(40):
-            if sc_query_state(self.service) == "STOPPED":
+            if sc_query_state(service) == "STOPPED":
+                stopped = True
                 break
             time.sleep(0.5)
-        self.after(0, self.refresh_status)
-        self._log_line(t("log.restart.start"))
-        sc_action("start", self.service)
+        if not stopped:
+            self._log_q.put(t("log.restart.stoptimeout"))
+            self._log_q.put("__RESTART_DONE__")
+            return
+        self._log_q.put("__REFRESH_STATUS__")
+        self._log_q.put(t("log.restart.start"))
+        sc_action("start", service)
         for _ in range(120):
-            if sc_query_state(self.service) == "RUNNING":
-                ok, d = check_health(self.var["host"].get().strip() or "127.0.0.1",
-                                     self.var["port"].get().strip() or "8080")
+            if sc_query_state(service) == "RUNNING":
+                ok, d = check_health(host, port)
                 if ok:
-                    self._log_line(fmt("log.restart.ready", d=d))
+                    self._log_q.put(fmt("log.restart.ready", d=d))
                     break
             time.sleep(0.5)
-        self.after(0, self.refresh_status)
+        self._log_q.put("__REFRESH_STATUS__")
+        self._log_q.put("__RESTART_DONE__")
 
     def apply_auto(self):
         """下拉即选即应用（先确认；无成功弹窗，失败才提示）。"""
@@ -959,12 +985,31 @@ class ControlGUI(ctk.CTk):
             self.txt_log.pack_forget()
 
     def _log_line(self, text):
+        """主线程专用：直接写日志控件。worker 线程一律经 _log_q.put。"""
         self.txt_log.configure(state="normal")
         self.txt_log.insert("end", text + "\n")
         self.txt_log.see("end")
         self.txt_log.configure(state="disabled")
 
+    def _drain_log(self):
+        """主线程消费日志队列：普通消息打印，哨兵驱动状态复位/刷新。"""
+        if self._stop_poll:
+            return
+        while True:
+            try:
+                text = self._log_q.get_nowait()
+            except queue.Empty:
+                break
+            if text == "__RESTART_DONE__":
+                self._restarting = False
+            elif text == "__REFRESH_STATUS__":
+                self.refresh_status()
+            else:
+                self._log_line(text)
+        self.after(120, self._drain_log)
+
     def _start_polling(self):
+        self._drain_log()
         self._poll_log()
         self._poll_health()
 
