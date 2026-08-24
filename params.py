@@ -62,6 +62,12 @@ def _is_number(s):
         return False
 
 
+def _is_neg_number(t):
+    """形如 -1 / -0.05 / -1.5 的负数值（排除 "-"、"--foo"、"---" 等 flag）。"""
+    return (t.startswith("-") and not t.startswith("--")
+            and len(t) > 1 and _is_number(t[1:]))
+
+
 def parse_params(text, fields):
     """解析 NSSM AppParameters 为 (values: dict, extras: list, warnings: list)。
 
@@ -84,7 +90,8 @@ def parse_params(text, fields):
                 values[key] = "1"
                 i += 1
                 continue
-            if i + 1 < n and not tokens[i + 1].startswith("-"):
+            if i + 1 < n and (not tokens[i + 1].startswith("-")
+                                or _is_neg_number(tokens[i + 1])):
                 val = tokens[i + 1]
                 i += 2
             else:

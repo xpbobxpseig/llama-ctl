@@ -118,6 +118,33 @@ def test_full_roundtrip_stable():
     assert v2 == vals and e2 == extras
 
 
+def _neg_fields():
+    """T2 用最小 fields：seed 文本型 + min_p 滑块（min 取负值，避免范围回退掩盖取值断言）。"""
+    return [
+        {"key": "seed", "kind": "text", "aliases": ["-s", "--seed"]},
+        {"key": "min_p", "kind": "slider", "aliases": ["--min-p"],
+         "min": -1.0, "max": 1.0, "step": 0.01, "default": 0.05, "label": "min-p"},
+    ]
+
+
+# --- 负数值当值不当 flag（T2 / P0-2）---
+
+def test_negative_value_not_flag():
+    N = _neg_fields()
+    vals, extras, _ = parse_params("-s -1", N)
+    assert vals["seed"] == "-1"
+    assert extras == []
+    out = build_params(vals, extras, N)
+    # build_params 统一输出最长别名（--seed），-1 必须作为值保留在重建文本中
+    assert "--seed -1" in out
+
+
+def test_negative_float_value():
+    vals, _, warns = parse_params("--min-p -0.05", _neg_fields())
+    assert vals["min_p"] == "-0.05"
+    assert warns == []
+
+
 # --- 反斜杠路径（T1 / P0-1）---
 
 def test_split_args_preserves_backslash_paths():
