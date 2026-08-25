@@ -661,6 +661,8 @@ class ControlGUI(ctk.CTk):
         # 停止 300ms 后恢复（缩放卡顿修复）。
         self._resizing = False
         self._resize_after = None
+        self._last_geometry_snapshot = ""  # 窗口几何快照：区分真实缩放与内部布局重排
+        self._layout_mutating = False      # 日志展开/折叠等布局突变期间禁滚动条切换
         self.bind("<Configure>", self._on_configure)
 
     # ---- 通用小组件 ----
@@ -1695,6 +1697,7 @@ class ControlGUI(ctk.CTk):
         必须在高度动画完成后执行（闪烁防护）；动效关时瞬时切换。
         """
         self._log_open.set(not self._log_open.get())
+        self._layout_mutating = True  # 展开/折叠期间 Configure 不做滚动条切换
         if self._log_anim_id > 0:
             self.anim.cancel(self._log_anim_id)
             self._log_anim_id = -1
@@ -1707,6 +1710,7 @@ class ControlGUI(ctk.CTk):
             if not self._motion_on():
                 self.txt_log.configure(height=170)
                 self.txt_log.pack_configure(fill="both", expand=True)
+                self._layout_mutating = False
                 return
             self.txt_log.configure(height=40)
 
@@ -1716,6 +1720,7 @@ class ControlGUI(ctk.CTk):
 
             def _open_done():
                 self._log_anim_id = -1
+                self._layout_mutating = False
                 self.txt_log.configure(height=170)
                 self.txt_log.pack_configure(fill="both", expand=True)  # 动画结束才撑满
 
@@ -1727,6 +1732,7 @@ class ControlGUI(ctk.CTk):
             if not self._motion_on():
                 self.txt_log.configure(height=40)
                 self.txt_log.pack_forget()
+                self._layout_mutating = False
                 return
 
             def _close_frame(p):
@@ -1735,6 +1741,7 @@ class ControlGUI(ctk.CTk):
 
             def _close_done():
                 self._log_anim_id = -1
+                self._layout_mutating = False
                 self.txt_log.configure(height=40)
                 self.txt_log.pack_forget()  # 动画完成后才移除，避免闪烁
 
@@ -1888,13 +1895,38 @@ class ControlGUI(ctk.CTk):
             except Exception as exc:  # noqa: BLE001 - worker 任何异常不致死循环
                 self._status_r.put(("result", "UNKNOWN", False, f"worker 异常: {exc}", None))
 
-    def _on_configure(self, _event=None):
+    def _on_configure(self, event=None):
         """缩放/拖拽防抖（缩放卡顿修复）：置 _resizing 并重置 300ms 定时器；
         连续 WM_CONFIGURE 期间 _drain_status/_poll_log 跳过 UI 应用。
-        注意：不在此处隐藏滚动条——展开日志面板等任何布局重排都会触发
-        Configure，隐藏/恢复滚动条会形成「Configure→隐藏→重排→Configure」
-        的振荡循环（日志面板持续抽动的根因）。滚动条保持常驻。"""
-        self._resizing = True
+
+        滚动条隐藏只在「窗口尺寸真实变化」时执行（event.width/height 与
+        上次快照比对）：展开日志面板等内部布局重排虽也触发 Configure，
+        但窗口尺寸不变——若在那种情况下隐藏/恢复滚动条，会形成
+        「Configure→隐藏→重排→Configure」的振荡循环（日志面板持续抽动的
+        根因）。尺寸变化才隐藏，两害兼治。"""
+        real_resize = False
+        if event is not None:
+            w = getattr(event, "width", 0)
+            h = getattr(event, "height", 0)
+            # 用窗口真实几何字符串（含位置）做快照：展开日志只是内部重排，
+            # geometry() 不变；真实缩放/移动 geometry() 一定变化
+            try:
+                cur = self.geometry()
+            except Exception:  # noqa: BLE001
+                cur = ""
+            if cur and cur != self._last_geometry_snapshot:
+                self._last_geometry_snapshot = cur
+                real_resize = True
+        if getattr(self, "_layout_mutating", False):
+            real_resize = False  # 日志面板展开/折叠等内部布局重排：不视为缩放
+        if real_resize:
+            self._resizing = True
+            try:
+                sb = getattr(self.scroll, "_scrollbar", None)
+                if sb is not None and sb.winfo_manager() == "grid":
+                    sb.grid_remove()  # 缩放期间隐藏滚动条：砍掉 CTkScrollbar._draw 重绘热点
+            except Exception:  # noqa: BLE001
+                pass
         if self._resize_after is not None:
             try:
                 self.after_cancel(self._resize_after)
@@ -1905,6 +1937,15 @@ class ControlGUI(ctk.CTk):
     def _resize_done(self):
         self._resizing = False
         self._resize_after = None
+        try:
+            sb = getattr(self.scroll, "_scrollbar", None)
+            if sb is not None:
+                mgr = sb.winfo_manager()
+                if mgr == "":        # 被 grid_remove 过：恢复
+                    sb.grid(row=1, column=1, sticky="nsew")
+                # mgr == "grid" 已是正常态，不动
+        except Exception:  # noqa: BLE001
+            pass
 
     def _drain_status(self):
         """主线程消费 _status_r：应用状态/探活/按钮联动/dirty 提示。
