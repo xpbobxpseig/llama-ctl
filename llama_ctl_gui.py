@@ -33,7 +33,7 @@ from nssm_adapter import (
 )
 from params import parse_params, build_params
 from settings import load_settings, save_settings
-from motion import Animator, format_hex, lerp, ease_out_cubic, ease_in_cubic
+from motion import Animator, format_hex, lerp, parse_hex, ease_out_cubic, ease_in_cubic
 import strings
 from strings import t, fmt
 
@@ -476,6 +476,9 @@ class ControlGUI(ctk.CTk):
         # D7 字段改动高亮：每字段恢复色 after token；_suppress_trace 屏蔽程序化填值
         self._field_flash_after = {}  # key -> after token（快速连改重置计时器）
         self._suppress_trace = False  # load_params/预设载入等程序化 set 期间屏蔽 trace
+        # D9 按钮渐隐帧 token 注册表 btn -> after token（手写 after 链，不走
+        # Animator；每帧执行前先摘除自身，关窗/重建时统一取消在途帧）
+        self._hover_fades = {}
         # D8 折叠分组：展开状态（_restart_ui 重建后保留，默认仅第一组展开）
         self.group_open = {}
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
@@ -489,9 +492,11 @@ class ControlGUI(ctk.CTk):
     def _btn(self, parent, text, cmd, kind="ghost"):
         """kind: primary / ghost / danger-text。
 
-        hover 动效（D4）：native hover_color 固定为底色，颜色过渡完全由
-        <Enter>/<Leave> 走 self.anim（160ms ease-out）；动效关时仍走原生瞬时
-        hover。禁用态（t5 联动置灰）跳过动效，避免覆盖禁用外观。
+        hover 动效（D4 + 指数渐隐）：native hover_color 固定为底色，颜色过渡完全由
+        <Enter>/<Leave> 驱动——进入 160ms ease-out 插到高亮并驻留（不回落）；
+        移出 2s 指数渐隐（α=exp(-t/τ), τ=0.67s, 每 16ms 一帧, α≤0.05 末帧定格
+        80ms 后直跳终态）；渐隐期移回中断渐隐、从当前色续插回高亮。动效关时
+        瞬时切换（原生 hover 行为）。禁用态（t5 联动置灰）跳过动效。
         """
         kw = dict(font=F_BODY, corner_radius=8, height=32)
         if kind == "primary":
@@ -507,10 +512,18 @@ class ControlGUI(ctk.CTk):
                       border_width=1, border_color=C_BORDER)
         btn = ctk.CTkButton(parent, text=text, command=cmd, **kw)
 
-        # hover 动效状态（闭包）：aid 当前 tween id；cur 我们最近写入的可插值颜色。
-        # 关键点：Tk 事件按注册序执行，CTk 内部 <Enter>/<Leave> 先于本 handler 把
-        # fg_color 复位，因此不能读 cget 取起点——用闭包记住自己写的颜色。
-        hstate = {"aid": -1, "cur": None}
+        # hover 动效状态（闭包）：
+        #   aid  进入/续插 tween 的 Animator id（-1 = 无）
+        #   cur  我们最近写入的可插值颜色。关键点：Tk 事件按注册序执行，CTk 内部
+        #        <Enter>/<Leave> 先于本 handler 把 fg_color 复位，因此不能读 cget
+        #        取起点——必须用闭包记住自己写的颜色
+        #   fade 在途渐隐帧的 after token（None = 无）；每帧自替换，token 同步
+        #        登记进 self._hover_fades，供关窗/_restart_ui 统一取消
+        hstate = {"aid": -1, "cur": None, "fade": None}
+        _FADE_TAU = 0.67   # 指数渐隐时间常数：2s 末 α=exp(-2/0.67)≈0.05
+        _FADE_STOP = 0.05  # α 降到该值 → 定格 _FADE_HOLD 毫秒后直跳终态
+        _FADE_HOLD = 80    # 末帧定格时长（ms，生动加分 2）
+        _FADE_FRAME = 16   # 渐隐帧间隔（ms）
 
         def _resolve_base():
             """transparent 基色按祖先链解析出真实底色（ghost/danger 落在卡片/行上）。
@@ -528,8 +541,19 @@ class ControlGUI(ctk.CTk):
                 p = getattr(p, "master", None)
             return C_CARD
 
-        def _fg_hover(target, back_to_transparent=False):
-            """进入：cur→hover；离开：cur→底色（末帧还原 transparent）。"""
+        def _fade_cancel():
+            """取消本按钮在途渐隐帧（若有），并从注册表摘除 token。"""
+            tok = self._hover_fades.pop(btn, None)
+            if tok is not None:
+                try:
+                    self.after_cancel(tok)
+                except Exception:  # noqa: BLE001 - token 已执行/已清理
+                    pass
+            hstate["fade"] = None
+
+        def _fade_enter(hover_col):
+            """进入 / 渐隐期移回：取消在途渐隐，从当前色续插回高亮（160ms ease-out）。"""
+            _fade_cancel()
             if hstate["aid"] > 0:
                 self.anim.cancel(hstate["aid"])
                 hstate["aid"] = -1
@@ -539,15 +563,14 @@ class ControlGUI(ctk.CTk):
                 hstate["cur"] = _resolve_base()
             start = hstate["cur"]
             if not self._motion_on():
-                btn.configure(fg_color="transparent" if back_to_transparent else target)
-                hstate["cur"] = _resolve_base() if back_to_transparent else target
+                btn.configure(fg_color=hover_col)
+                hstate["cur"] = hover_col
                 return
 
             def _tick(p):
                 if btn.cget("state") == "disabled":
                     return  # 中途被置灰（如 t5 轮询）：停止写色，保住禁用外观
-                t = ease_out_cubic(p, 1)
-                col = format_hex(lerp(start, target, t))
+                col = format_hex(lerp(start, hover_col, ease_out_cubic(p, 1)))
                 hstate["cur"] = col
                 btn.configure(fg_color=col)
 
@@ -555,19 +578,105 @@ class ControlGUI(ctk.CTk):
                 hstate["aid"] = -1
                 if btn.cget("state") == "disabled":
                     return
-                if back_to_transparent:
-                    btn.configure(fg_color="transparent")
-                    hstate["cur"] = _resolve_base()
-                else:
-                    hstate["cur"] = target
+                hstate["cur"] = hover_col
 
             hstate["aid"] = self.anim.animate(_tick, 160, on_done=_done)
             if hstate["aid"] <= 0:  # 瞬时/降级：on_done 已同步执行
                 hstate["aid"] = -1
 
-        btn.bind("<Enter>", lambda e: _fg_hover(hover))
-        # 离开：primary 回到自身底色 C_ACC；ghost/danger 回 transparent（插值到祖先底色）
-        btn.bind("<Leave>", lambda e: _fg_hover(
+        def _fade_leave(final_col, back_to_transparent=False):
+            """移出：2s 指数渐隐 高亮→终态（手写 after 帧链，不用 Animator）。
+
+            每帧 α = exp(-t/τ)，t 取墙钟（time.monotonic，窗口卡顿时自然掉帧
+            不拖长）；颜色 = lerp(终态, 高亮, α)。终态色先按亮度压 2%
+            （生动加分 1：消退更真实），α≤0.05 时定格 80ms 再直跳终态。
+            """
+            _fade_cancel()
+            if hstate["aid"] > 0:
+                self.anim.cancel(hstate["aid"])
+                hstate["aid"] = -1
+            if btn.cget("state") == "disabled":
+                return  # t5 联动置灰时不动外观
+            if hstate["cur"] is None:
+                hstate["cur"] = _resolve_base()
+            peak = hstate["cur"]          # 渐隐起点（离开瞬间的实际颜色）
+            hstate["cur"] = final_col     # 渐隐期终态基准（移回续插的终点）
+            if not self._motion_on():
+                btn.configure(fg_color="transparent" if back_to_transparent
+                              else final_col)
+                return
+            if btn.cget("state") == "disabled":
+                return
+
+            # 终态色亮度轻压 2%（浅色向黑、深色向白偏移）
+            if final_col == "transparent":
+                base_col = _resolve_base()
+            else:
+                base_col = final_col
+            rgb = parse_hex(base_col)
+            lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+            anchor = (0, 0, 0) if lum > 128 else (255, 255, 255)
+            target = format_hex(lerp(base_col, anchor, 0.02))
+
+            t0 = time.monotonic()
+
+            def _schedule_frame(fn, ms):
+                """调度一帧并登记 token（hstate + 注册表）；帧执行时先摘除自身。"""
+                box = {}
+
+                def _run():
+                    self._hover_fades.pop(btn, None)
+                    hstate["fade"] = None
+                    fn()
+
+                box["tok"] = self.after(ms, _run)
+                self._hover_fades[btn] = box["tok"]
+                hstate["fade"] = box["tok"]
+
+            def _frame():
+                try:
+                    if not btn.winfo_exists():
+                        return  # 按钮已随 _restart_ui 销毁：帧链自灭
+                    if btn.cget("state") == "disabled":
+                        # 中途被置灰（如 t5 轮询）：停在当前帧色，保住禁用外观
+                        hstate["cur"] = None
+                        return
+                    a = math.exp(-(time.monotonic() - t0) / _FADE_TAU)
+                    if a <= _FADE_STOP:
+                        # 末帧定格 80ms 再直跳终态（生动加分 2）
+                        _schedule_frame(lambda: _fade_finish(final_col),
+                                        _FADE_HOLD)
+                        return
+                    col = format_hex(lerp(target, peak, a))
+                    hstate["cur"] = col
+                    btn.configure(fg_color=col)
+                    _schedule_frame(_frame, _FADE_FRAME)
+                except Exception:  # noqa: BLE001 - 销毁竞态下的 TclError 等吞掉
+                    self._hover_fades.pop(btn, None)
+                    hstate["fade"] = None
+
+            def _fade_finish(final):
+                try:
+                    if not btn.winfo_exists():
+                        return
+                    if btn.cget("state") == "disabled":
+                        hstate["cur"] = None
+                        return
+                    if back_to_transparent:
+                        btn.configure(fg_color="transparent")
+                        hstate["cur"] = _resolve_base()
+                    else:
+                        btn.configure(fg_color=final)
+                        hstate["cur"] = final
+                except Exception:  # noqa: BLE001
+                    self._hover_fades.pop(btn, None)
+                    hstate["fade"] = None
+
+            _schedule_frame(_frame, _FADE_FRAME)
+
+        btn.bind("<Enter>", lambda e: _fade_enter(hover))
+        # 离开：primary 回 C_ACC；ghost/danger 回 transparent（终态按祖先底色插值）
+        btn.bind("<Leave>", lambda e: _fade_leave(
             base if kind == "primary" else _resolve_base(),
             back_to_transparent=(kind != "primary")))
         return btn
@@ -1578,6 +1687,13 @@ class ControlGUI(ctk.CTk):
     def _on_close(self):
         self._stop_poll = True
         self.anim.cancel_all()  # 停掉全部在途动画，帧回调发现不在注册表即自停
+        # 取消全部按钮渐隐 after 帧（D9：无泄漏 after；按钮销毁后回调自吞 TclError）
+        for tok in list(self._hover_fades.values()):
+            try:
+                self.after_cancel(tok)
+            except Exception:  # noqa: BLE001
+                pass
+        self._hover_fades.clear()
         # 取消全部字段高亮恢复计时器（D7：无泄漏 after）
         for _k, tok in list(self._field_flash_after.items()):
             try:
@@ -1671,6 +1787,14 @@ class ControlGUI(ctk.CTk):
         # 字段高亮计时器全部失效（旧控件已销毁），清空即可（D7）
         self._field_flash_after.clear()
         self._suppress_trace = False
+        # D9 按钮渐隐帧：旧控件已随上方 destroy 销毁，取消防残留 after 帧。
+        # 帧回调发现 token 不在注册表即自停，兜底 winfo_exists 保证无 TclError。
+        for tok in list(self._hover_fades.values()):
+            try:
+                self.after_cancel(tok)
+            except Exception:  # noqa: BLE001
+                pass
+        self._hover_fades.clear()
         # D8 折叠分组展开状态保留（group_open 在 _build_widgets 里按存量恢复）
         self._breathing = False
         self._breath_id = -1
