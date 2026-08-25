@@ -371,42 +371,130 @@ F_GROUP = ("Microsoft YaHei UI", 12, "bold")
 
 
 class _HelpTip:
-    """问号按钮 hover 提示（D7 延迟 hover）：悬停 300ms 后才出现，移开即取消。
+    """问号按钮 hover 提示（D7 延迟 hover + F2 渐隐动效）：
 
-    快速扫过不出提示；这是交互延迟不是动效，不受 motion_enabled 开关影响。
+    悬停 300ms 后淡入（200ms ease-out，窗口 alpha 0→1），移开后 2s 指数渐隐
+    （α=exp(-k·t/τ)，τ=0.51s，每 16ms 一帧，末段 α 阶梯 0.05/0.02/0 后销毁）；
+    渐隐期移回立即恢复 α=1；新提示出现时旧提示立即终止并销毁（全局互斥，
+    后悬停者优先）。300ms 延迟是交互防误触，不受动效开关影响；淡入/渐隐
+    受动效开关控制（关→瞬时显示/瞬时消失）。所有 after 帧回调在窗口销毁
+    竞态下吞 TclError（winfo_exists 检查 + try/except）。
     """
-    def __init__(self, widget, text_fn):
+
+    _TAU = 0.51          # 指数渐隐时间常数：2s 末 α=exp(-2/0.51)≈0.02
+    _FADE_MS = 16        # 淡入/渐隐帧间隔
+    _FADE_IN_MS = 200    # 淡入时长
+    _active = None       # 当前唯一活动提示实例（全局互斥）
+    _hovering = None     # 最近进入悬停的实例（后悬停者优先）
+
+    def __init__(self, widget, text_fn, motion_on=None):
         self.widget = widget
         self.text_fn = text_fn          # 延迟取值，内容始终最新
+        self.motion_on = motion_on if motion_on is not None else (lambda: True)
         self.win = None
-        self._after_id = None           # 延迟显示计时器 token
+        self._after_id = None           # 延迟显示计时器 token（300ms 防误触）
+        self._frame = None              # 淡入/渐隐帧 after token（帧链）
+        self._t0 = 0.0                  # 当前帧链起点（墙钟）
+        self._alpha = 1.0               # 最近写入的窗口 alpha
+        self._stage = 0                 # 末段阶梯：0 自然衰减 / 1 定格 0.05 / 2 定格 0.02
         widget.bind("<Enter>", self._enter)
         widget.bind("<Leave>", self._leave)
         widget.bind("<Button-1>", self._hide)   # 万一点击也立即收起
 
-    def _enter(self, _=None):
+    # ---- 帧链工具 ----
+
+    def _cancel_frame(self):
+        """取消在途淡入/渐隐帧（若有）。控件销毁后 after_cancel 会 TclError，吞掉。"""
+        if self._frame is not None:
+            try:
+                self.widget.after_cancel(self._frame)
+            except Exception:  # noqa: BLE001 - 控件销毁后 token 已失效
+                pass
+            self._frame = None
+
+    def _schedule(self, fn, ms):
+        """调度一帧并把 token 存 _frame（下一帧/取消时用）。"""
+        self._frame = self.widget.after(ms, fn)
+
+    def _destroy_win(self):
+        """销毁提示窗并清理全部计时器/帧链与互斥状态（收尾/互斥/点击共用）。"""
+        self._cancel_frame()
+        if self._after_id is not None:
+            try:
+                self.widget.after_cancel(self._after_id)
+            except Exception:  # noqa: BLE001
+                pass
+            self._after_id = None
         if self.win is not None:
-            return  # 已显示不重复调度
+            win = self.win            # 先保存局部引用再置空（规格 2.2）
+            self.win = None
+            try:
+                win.destroy()
+            except Exception:  # noqa: BLE001 - 已销毁则忽略
+                pass
+        if _HelpTip._active is self:
+            _HelpTip._active = None
+        if _HelpTip._hovering is self:
+            _HelpTip._hovering = None
+
+    # ---- 事件 ----
+
+    def _enter(self, _=None):
+        # 互斥：新提示出现，旧提示立即终止并销毁（后悬停者优先）
+        if _HelpTip._active is not None and _HelpTip._active is not self:
+            _HelpTip._active._destroy_win()
+        _HelpTip._hovering = self
+        if self.win is not None:
+            # 渐隐期移回：中断渐隐帧，立即恢复 α=1 显示
+            self._cancel_frame()
+            self._stage = 0
+            try:
+                self.win.attributes("-alpha", 1.0)
+            except Exception:  # noqa: BLE001 - 销毁竞态下静默
+                pass
+            self._alpha = 1.0
+            return
         if self._after_id is None:
             self._after_id = self.widget.after(300, self._show)
 
     def _leave(self, _=None):
+        if _HelpTip._hovering is self:
+            _HelpTip._hovering = None
         if self._after_id is not None:
             try:
                 self.widget.after_cancel(self._after_id)
             except Exception:  # noqa: BLE001 - 控件销毁后 token 已失效
                 pass
             self._after_id = None
-        self._hide()
+        if self.win is None:
+            return
+        self._cancel_frame()
+        if not self.motion_on():
+            self._destroy_win()  # 动效关：瞬时消失
+            return
+        # 从当前 alpha 起步渐隐（淡入中途移出也自然衔接）
+        try:
+            self._alpha = max(0.0, min(1.0, float(self.win.attributes("-alpha"))))
+        except Exception:  # noqa: BLE001 - 读不到 alpha 按全显处理
+            self._alpha = 1.0
+        self._stage = 0
+        self._t0 = time.monotonic()
+        self._schedule(self._fade_frame, _HelpTip._FADE_MS)
+
+    # ---- 显示 / 渐隐帧 ----
 
     def _show(self, _=None):
         self._after_id = None  # 定时器已触发
+        if _HelpTip._hovering is not self:
+            return  # 已被更新的悬停者抢占（旧定时器晚到）
         try:
             if self.win is not None:
                 return
             text = self.text_fn()
             if not text:
                 return
+            if _HelpTip._active is not None and _HelpTip._active is not self:
+                _HelpTip._active._destroy_win()
             win = tk.Toplevel(self.widget)
             win.overrideredirect(True)
             win.wm_attributes("-topmost", True)
@@ -420,13 +508,80 @@ class _HelpTip:
             y = self.widget.winfo_rooty()
             win.geometry(f"+{x}+{y}")
             self.win = win
+            _HelpTip._active = self
+            if self.motion_on():
+                self._alpha = 0.0
+                win.attributes("-alpha", 0.0)
+                self._t0 = time.monotonic()
+                self._schedule(self._fade_in_frame, _HelpTip._FADE_MS)
+            else:
+                win.attributes("-alpha", 1.0)  # 动效关：瞬时显示
+                self._alpha = 1.0
         except Exception:  # noqa: BLE001 - 定时器晚到且控件已销毁（UI 重建）时静默放弃
             pass
 
+    def _fade_in_frame(self):
+        """淡入帧：200ms ease-out，α 0→1。"""
+        try:
+            self._frame = None
+            win = self.win
+            if win is None:
+                return
+            if not win.winfo_exists():
+                self.win = None
+                if _HelpTip._active is self:
+                    _HelpTip._active = None
+                return
+            t = (time.monotonic() - self._t0) * 1000.0 / _HelpTip._FADE_IN_MS
+            if t >= 1.0:
+                win.attributes("-alpha", 1.0)
+                self._alpha = 1.0
+                return
+            a = ease_out_cubic(t, 1.0)
+            win.attributes("-alpha", max(0.0, a))
+            self._alpha = a
+            self._schedule(self._fade_in_frame, _HelpTip._FADE_MS)
+        except Exception:  # noqa: BLE001 - 销毁竞态下的 TclError 等吞掉
+            self._frame = None
+
+    def _fade_frame(self):
+        """渐隐帧：α=exp(-k·t/τ)；k 随光标离问号距离加速（加分 1），
+        末段 α 按 0.05/0.02 阶梯定格后销毁（加分 2）。"""
+        try:
+            self._frame = None
+            win = self.win
+            if win is None:
+                return
+            if not win.winfo_exists():
+                self.win = None
+                if _HelpTip._active is self:
+                    _HelpTip._active = None
+                return
+            # 加分 1：光标离问号越远渐隐越快（0~400px 线性加速至 2 倍）
+            px = win.winfo_pointerx() - (self.widget.winfo_rootx()
+                                         + self.widget.winfo_width() // 2)
+            py = win.winfo_pointery() - (self.widget.winfo_rooty()
+                                         + self.widget.winfo_height() // 2)
+            k = 1.0 + min(max(abs(px), abs(py)) / 400.0, 1.0)
+            a = math.exp(-(time.monotonic() - self._t0) * k / _HelpTip._TAU)
+            # 加分 2：末段阶梯化（0.05 / 0.02 / 0），避免低 alpha 闪烁
+            if a < 0.05:
+                if self._stage == 0:
+                    a, self._stage = 0.05, 1
+                elif self._stage == 1:
+                    a, self._stage = 0.02, 2
+                else:
+                    self._destroy_win()
+                    return
+            win.attributes("-alpha", max(0.0, a))
+            self._alpha = a
+            self._schedule(self._fade_frame, _HelpTip._FADE_MS)
+        except Exception:  # noqa: BLE001 - 销毁竞态下的 TclError 等吞掉
+            self._frame = None
+
     def _hide(self, _=None):
-        if self.win is not None:
-            self.win.destroy()
-            self.win = None
+        """点击立即收起（清理帧链与互斥状态，同收尾路径）。"""
+        self._destroy_win()
 
 
 class ControlGUI(ctk.CTk):
@@ -476,7 +631,7 @@ class ControlGUI(ctk.CTk):
         # D7 字段改动高亮：每字段恢复色 after token；_suppress_trace 屏蔽程序化填值
         self._field_flash_after = {}  # key -> after token（快速连改重置计时器）
         self._suppress_trace = False  # load_params/预设载入等程序化 set 期间屏蔽 trace
-        # D9 按钮渐隐帧 token 注册表 btn -> after token（手写 after 链，不走
+        # F1 按钮渐隐帧 token 注册表 btn -> after token（手写 after 链，不走
         # Animator；每帧执行前先摘除自身，关窗/重建时统一取消在途帧）
         self._hover_fades = {}
         # D8 折叠分组：展开状态（_restart_ui 重建后保留，默认仅第一组展开）
@@ -906,7 +1061,7 @@ class ControlGUI(ctk.CTk):
                             border_color=C_BORDER, hover_color=C_CARD, text_color=C_MUT,
                             cursor="question_arrow")
         btn.grid(row=row, column=0, padx=(0, 8), pady=4)
-        _HelpTip(btn, lambda k=key: self._help_text(k))
+        _HelpTip(btn, lambda k=key: self._help_text(k), motion_on=self._motion_on)
 
         v = tk.StringVar()
         self.var[key] = v
@@ -1687,7 +1842,7 @@ class ControlGUI(ctk.CTk):
     def _on_close(self):
         self._stop_poll = True
         self.anim.cancel_all()  # 停掉全部在途动画，帧回调发现不在注册表即自停
-        # 取消全部按钮渐隐 after 帧（D9：无泄漏 after；按钮销毁后回调自吞 TclError）
+        # 取消全部按钮渐隐 after 帧（F1：无泄漏 after；按钮销毁后回调自吞 TclError）
         for tok in list(self._hover_fades.values()):
             try:
                 self.after_cancel(tok)
@@ -1787,7 +1942,7 @@ class ControlGUI(ctk.CTk):
         # 字段高亮计时器全部失效（旧控件已销毁），清空即可（D7）
         self._field_flash_after.clear()
         self._suppress_trace = False
-        # D9 按钮渐隐帧：旧控件已随上方 destroy 销毁，取消防残留 after 帧。
+        # F1 按钮渐隐帧：旧控件已随上方 destroy 销毁，取消防残留 after 帧。
         # 帧回调发现 token 不在注册表即自停，兜底 winfo_exists 保证无 TclError。
         for tok in list(self._hover_fades.values()):
             try:
