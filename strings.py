@@ -22,13 +22,13 @@ STRINGS = {
     "svc.label":        {"zh": "服务", "en": "Svc"},
     "state.unknown":    {"zh": "服务 —", "en": "Svc —"},
     "health.idle":      {"zh": "探活 —", "en": "Health —"},
-    "health.down":      {"zh": "探活 未运行", "en": "Health not running"},
+    "health.down":      {"zh": "探活 未运行", "en": "Health not running"},  # 19ch，状态行 OK
     "boot.label":       {"zh": "开机自启", "en": "Auto-start"},
     "boot.auto":        {"zh": "自动(开机)", "en": "Auto (boot)"},
     "boot.manual":      {"zh": "手动", "en": "Manual"},
     "boot.disabled":    {"zh": "禁用", "en": "Disabled"},
     # ---- 预设 ----
-    "preset.name.ph":   {"zh": "预设名（输入或选）", "en": "Preset name (type or pick)"},
+    "preset.name.ph":   {"zh": "预设名（输入或选）", "en": "Preset name (type or pick)"},  # 27ch，空 combo 展位不溢出
     "preset.delete":    {"zh": "删除", "en": "Delete"},
     "preset.autobackup":{"zh": "自动备份 {t}", "en": "Auto backup {t}"},
     # ---- 参数区 ----
@@ -41,7 +41,7 @@ STRINGS = {
     "btn.apply2":       {"zh": "应用更改", "en": "Apply changes"},
     # ---- 日志 ----
     "log.collapsed":    {"zh": "日志尾随 server.err（已折叠）", "en": "Tail server.err (collapsed)"},
-    "log.expanded":     {"zh": "日志尾随 server.err（点击折叠）", "en": "Tail server.err (click to fold)"},
+    "log.expanded":     {"zh": "日志尾随 server.err（点击折叠）", "en": "Log tail: server.err (click to fold)"},  # 37ch，日志头 fit 适配
     "log.restart.stop": {"zh": ">>> 重启 {s}：停止...", "en": ">>> Restarting {s}: stopping..."},
     "log.restart.start":{"zh": ">>> 启动...", "en": ">>> Starting..."},
     "log.restart.ready":{"zh": ">>> 服务就绪：{d}", "en": ">>> Service ready: {d}"},
@@ -52,9 +52,11 @@ STRINGS = {
     "status.svc":       {"zh": "服务 {st}", "en": "Svc {st}"},
     "status.health.ok": {"zh": "探活 OK · {d}", "en": "Health OK · {d}"},
     "status.health.bad":{"zh": "探活 FAIL · {d}", "en": "Health FAIL · {d}"},
+    # ---- 状态 / 内联提示（P2 英文冒烟补齐：原为硬编码中文）----
+    "status.dirty":     {"zh": "● 有未应用的更改", "en": "● Unapplied changes"},  # 19ch，预设行右侧留白充足
     # ---- 设置窗口 ----
     "settings.title":   {"zh": "设置", "en": "Settings"},
-    "settings.lang":    {"zh": "界面语言（参数详解保持中文）", "en": "UI language (parameter guides stay Chinese)"},
+    "settings.lang":    {"zh": "界面语言（参数详解保持中文）", "en": "Language (parameter guides stay Chinese)"},  # 42ch < 360px 可用宽
     "settings.appear":  {"zh": "外观", "en": "Appearance"},
     "settings.motion":  {"zh": "动效（关闭后所有动画直跳终态）", "en": "Motion (off = instant, no animation)"},
     "appear.system":    {"zh": "跟随系统", "en": "System"},
@@ -62,7 +64,7 @@ STRINGS = {
     "appear.dark":      {"zh": "深色", "en": "Dark"},
     "settings.close":   {"zh": "关闭", "en": "Close"},
     "settings.note":    {"zh": "几何与预设记忆自动生效，无需设置。",
-                         "en": "Geometry & last-preset memory are automatic."},
+                         "en": "Geometry & last-preset memory are automatic."},  # 45ch ≤ 一行 52ch，不换行
     "btn.settings":     {"zh": "⚙ 设置", "en": "⚙ Settings"},
     # ---- messagebox 标题 ----
     "mb.unsupported":   {"zh": "不支持", "en": "Unsupported"},
@@ -92,12 +94,21 @@ STRINGS = {
     "msg.auto.fail":    {"zh": "开机自启设置失败：{o}", "en": "Auto-start change failed: {o}"},
     "msg.auto.confirm": {"zh": "将开机自启设为「{m}」？", "en": "Set auto-start to \"{m}\"?"},
     "msg.svc.dirty":    {"zh": "当前表单有未应用的更改，切换服务将丢失。是否先把当前表单自动备份为新预设再切换？",
-                         "en": "Unapplied changes will be lost on switch. Auto-backup current form as a new preset first?"},
+                         "en": "The form has unapplied changes. Switch now and auto-backup the form as a new preset?"},  # 88ch，messagebox 自换行
     "msg.apply.run":    {"zh": "服务正在运行，将写回新参数并自动重启（{s}）：\n\n新参数：\n{n}\n\n旧参数：\n{o}\n\n确认？",
                          "en": "Service is running; parameters will be written and the service restarted ({s}):\n\nNew:\n{n}\n\nOld:\n{o}\n\nProceed?"},
     "msg.apply.stop":   {"zh": "即将写回 NSSM AppParameters（服务 {s}，当前未运行）：\n\n新参数：\n{n}\n\n旧参数：\n{o}\n\n确认写回？",
                          "en": "About to write NSSM AppParameters (service {s}, not running):\n\nNew:\n{n}\n\nOld:\n{o}\n\nProceed?"},
 }
+
+
+def wraplength_for(win_width, offset=160, floor=400):
+    """P2 动态 wraplength 公式：窗口宽减去固定边距，下限 400 防极窄时折行过碎。
+
+    GUI 的 lbl_hint / lbl_warn 在 <Configure> 时按此更新；测试直接复用同一
+    公式，保证「实现 = 验收」零漂移。
+    """
+    return max(floor, int(win_width or 0) - offset)  # None/0 → floor
 
 
 def set_lang(lang):

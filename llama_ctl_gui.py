@@ -24,7 +24,7 @@ import threading
 import time
 import tkinter as tk
 from PIL import Image as PILImage
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import filedialog, font as tkfont, messagebox, scrolledtext, ttk
 
 from nssm_adapter import (
     NSSM_EXE, DEFAULT_SERVICE, get_app_parameters, set_app_parameters,
@@ -695,6 +695,16 @@ class ControlGUI(ctk.CTk):
             kw.update(fg_color="transparent", hover_color=hover, text_color=base,
                       border_width=1, border_color=C_BORDER, hover=False)
         btn = ctk.CTkButton(parent, text=text, command=cmd, **kw)
+        # P2 按钮宽度自适应 + 最小宽度（英文溢出修复）：用按钮实际渲染字体
+        # （_text_label 已含 DPI/缩放处理）测文本像素宽，替代 CTkButton 默认
+        # 固定 140；每侧 14px 内边距 + 2px 边框余量，下限 88 防短词局促。
+        # 语言切换经 _restart_ui 重建按钮，宽度随文案自适应。
+        try:
+            _f = tkfont.Font(font=btn._text_label.cget("font"))
+            _tw = _f.measure(text)
+        except Exception:  # noqa: BLE001 - 极端环境回退最小宽
+            _tw = 0
+        btn.configure(width=max(88, _tw + 2 * 14 + 2))
 
         # hover 动效状态（闭包）：
         #   aid  进入/续插 tween 的 Animator id（-1 = 无）
@@ -906,8 +916,8 @@ class ControlGUI(ctk.CTk):
         # 头部：标题 + 服务选择
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=16, pady=(14, 2))
-        ctk.CTkLabel(head, text="llama.cpp 服务控制台", font=F_TITLE,
-                     text_color=C_TXT).pack(side="left")
+        ctk.CTkLabel(head, text=t("app.title"), font=F_TITLE,
+                     text_color=C_TXT).pack(side="left")  # P2：标题随语言切换（原硬编码中文，复用 app.title 键）
         svc = ctk.CTkFrame(head, fg_color="transparent")
         svc.pack(side="right")
         ctk.CTkLabel(svc, text=t("svc.label"), font=F_BODY, text_color=C_MUT).pack(side="left", padx=(0, 6))
@@ -1043,7 +1053,7 @@ class ControlGUI(ctk.CTk):
 
         # combo 选项实时解释行
         self.lbl_hint = ctk.CTkLabel(pc, text="", font=F_SMALL, text_color=C_MUT,
-                                     anchor="w", wraplength=880, justify="left")
+                                     anchor="w", justify="left")  # wraplength 由 _sync_wraplengths 动态设置
         self.lbl_hint.pack(fill="x", pady=(8, 0))
 
         # 日志（可折叠，默认收起，把空间留给启动参数）
@@ -1066,7 +1076,7 @@ class ControlGUI(ctk.CTk):
         # 默认不打包日志区，仅头部行
         # 警告行（解析告警）挂在日志折叠条下方
         self.lbl_warn = ctk.CTkLabel(self, text="", font=F_SMALL, text_color=C_ORG,
-                                     anchor="w", wraplength=900, justify="left")
+                                     anchor="w", justify="left")  # wraplength 由 _sync_wraplengths 动态设置
         self.lbl_warn.pack(fill="x", padx=16, pady=(2, 8))
 
     def _group_label(self, group):
@@ -1905,6 +1915,20 @@ class ControlGUI(ctk.CTk):
             except Exception as exc:  # noqa: BLE001 - worker 任何异常不致死循环
                 self._status_r.put(("result", "UNKNOWN", False, f"worker 异常: {exc}", None))
 
+    def _sync_wraplengths(self):
+        """P2 动态 wraplength：窗口变窄时 hint/warn 行跟随窗口宽度折行。
+
+        滚动条逻辑在 real_resize 分支内，此处放分支外、用 try/except 兜底：
+        UI 重建竞态下静默跳过，不干扰 _on_configure 的防抖与滚动条管理。
+        """
+        try:
+            w = strings.wraplength_for(self.winfo_width())
+            for lbl in (getattr(self, "lbl_hint", None), getattr(self, "lbl_warn", None)):
+                if lbl is not None and lbl.winfo_exists() and lbl.winfo_manager():
+                    lbl.configure(wraplength=w)
+        except Exception:  # noqa: BLE001 - 重建竞态下静默
+            pass
+
     def _on_configure(self, event=None):
         """缩放/拖拽防抖（缩放卡顿修复）：置 _resizing 并重置 300ms 定时器；
         连续 WM_CONFIGURE 期间 _drain_status/_poll_log 跳过 UI 应用。
@@ -1943,6 +1967,10 @@ class ControlGUI(ctk.CTk):
             except Exception:  # noqa: BLE001
                 pass
         self._resize_after = self.after(300, self._resize_done)
+        # P2：动态 wraplength 放在 real_resize 分支外——仅当尺寸真实变化或
+        # 首次建窗时更新，避免内部布局重排反复触发无谓的 configure
+        if real_resize or event is None:
+            self._sync_wraplengths()
 
     def _resize_done(self):
         self._resizing = False
@@ -2005,7 +2033,7 @@ class ControlGUI(ctk.CTk):
                 if got[4] is not None:
                     self._dirty_cache = got[4]
                 dirty = self._dirty_cached()
-                self.lbl_dirty.configure(text="● 有未应用的更改" if dirty else "")
+                self.lbl_dirty.configure(text=t("status.dirty") if dirty else "")
                 self.btn_revert.configure(state="normal" if dirty else "disabled")
             except Exception:  # noqa: BLE001 - 控件销毁竞态静默
                 pass
@@ -2044,7 +2072,7 @@ class ControlGUI(ctk.CTk):
     def open_settings(self):
         win = ctk.CTkToplevel(self)
         win.title(t("settings.title"))
-        win.geometry("420x320")
+        win.geometry("500x320")  # P2：加宽设置窗，容纳英文长文案
         win.transient(self)
         win.grab_set()
         self._settings_win = win
