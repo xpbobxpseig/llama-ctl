@@ -501,8 +501,10 @@ class _HelpTip:
             fr = ctk.CTkFrame(win, fg_color=C_TIP, corner_radius=10,
                               border_width=1, border_color=C_BORDER)
             fr.pack(padx=0, pady=0)
+            # 提示窗宽度由 label wraplength 自适应（P1-1：420→520，长 help 文案换行完整；
+            # 520+padx24+边框2 ≈ 546px，1440p 屏无碍）
             ctk.CTkLabel(fr, text=text, font=F_SMALL, text_color=C_TXT,
-                         justify="left", anchor="w", wraplength=420,
+                         justify="left", anchor="w", wraplength=520,
                          padx=12, pady=8).pack()
             x = self.widget.winfo_rootx() + self.widget.winfo_width() + 6
             y = self.widget.winfo_rooty()
@@ -638,7 +640,7 @@ class ControlGUI(ctk.CTk):
         # F1 按钮渐隐帧 token 注册表 btn -> after token（手写 after 链，不走
         # Animator；每帧执行前先摘除自身，关窗/重建时统一取消在途帧）
         self._hover_fades = {}
-        # D8 折叠分组：展开状态（_restart_ui 重建后保留，默认仅第一组展开）
+        # D8 折叠分组：展开状态（_restart_ui 重建后保留，默认展开前两组）
         self.group_open = {}
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
         # 探活 worker（拖拽卡顿修复）：所有同步阻塞的 nssm/sc/urlopen 移出
@@ -912,7 +914,7 @@ class ControlGUI(ctk.CTk):
         self.service_var = tk.StringVar(value=self.service)
         self.cmb_service = ctk.CTkOptionMenu(svc, variable=self.service_var,
                                              values=list_nssm_services(),
-                                             width=170, font=F_BODY,
+                                             width=220, font=F_BODY,
                                              fg_color=C_CARD, button_color=C_BORDER,
                                              button_hover_color=C_ACC,
                                              text_color=C_TXT,
@@ -928,6 +930,9 @@ class ControlGUI(ctk.CTk):
         self.dot_state.pack(side="left")
         self.lbl_state = ctk.CTkLabel(row, text=t("state.unknown"), font=F_BODY, text_color=C_MUT)
         self.lbl_state.pack(side="left")
+        # P1-3：状态卡完整服务名（长 NSSM 服务名在下拉里仍可能被截，此处全文可见）
+        self.lbl_svc = ctk.CTkLabel(row, text=self.service, font=F_SMALL, text_color=C_MUT)
+        self.lbl_svc.pack(side="left", padx=(12, 0))
         self.lbl_health = ctk.CTkLabel(row, text=t("health.idle"), font=F_BODY, text_color=C_MUT)
         self.lbl_health.pack(side="left", padx=(18, 0))
         ctk.CTkLabel(row, text=t("boot.label"), font=F_SMALL, text_color=C_MUT
@@ -1005,9 +1010,10 @@ class ControlGUI(ctk.CTk):
             if g not in groups:
                 groups.append(g)
         self.group_open = self.group_open or {}  # 历史空字典（升级路径）
-        # 仅第一组默认展开；已存在的展开状态（跨 _restart_ui）原样保留
+        # P1-4：默认展开前两组（模型与视觉 + 加速）；已存在的展开状态
+        # （跨 _restart_ui 用户手动开合）原样保留
         for i, g in enumerate(groups):
-            self.group_open.setdefault(g, i == 0)
+            self.group_open.setdefault(g, i < 2)
             head = ctk.CTkButton(
                 self.scroll, text=self._group_label(g), font=F_GROUP,
                 text_color=C_ACC if self.group_open[g] else C_MUT,
@@ -1160,11 +1166,15 @@ class ControlGUI(ctk.CTk):
         if fld["kind"] == "path":
             ctk.CTkLabel(parent, text=fld["label"], font=F_BODY, text_color=C_TXT,
                          anchor="w").grid(row=row, column=1, sticky="w", padx=2)
+            # P1-2：Entry 保留 width=430（CTkEntry 透传 xview/xview_scroll，原生
+            # ←→ 键滚动可用）；超长路径完整内容由「浏览」按钮 hover 提示展示。
             w = ctk.CTkEntry(parent, textvariable=v, width=430, font=F_BODY,
                              fg_color=C_FIELD, border_color=C_BORDER)
             w.grid(row=row, column=2, sticky="ew", padx=4, pady=6)
-            self._btn(parent, t("browse"), lambda k=key: self._browse(k)).grid(
-                row=row, column=3, sticky="w", padx=4)
+            btn_browse = self._btn(parent, t("browse"), lambda k=key: self._browse(k))
+            btn_browse.grid(row=row, column=3, sticky="w", padx=4)
+            _HelpTip(btn_browse, lambda k=key: self.var[k].get() or "",
+                     motion_on=self._motion_on)  # 路径超长时 hover 浏览按钮看全文
             self.widgets[key] = w
             return row + 1
 
@@ -1978,6 +1988,11 @@ class ControlGUI(ctk.CTk):
                     self.btn_stop.configure(state="disabled")
                 self.lbl_state.configure(text=fmt("status.svc", st=state),
                                          text_color=self._state_color(state))
+                # 服务名变化（on_service_change）立即同步到状态卡完整名 label
+                if hasattr(self, "lbl_svc"):
+                    cur_svc = self.service_var.get()
+                    if self.lbl_svc.cget("text") != cur_svc:
+                        self.lbl_svc.configure(text=cur_svc)
                 if state == "RUNNING":
                     self.lbl_health.configure(
                         text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
