@@ -373,15 +373,15 @@ F_GROUP = ("Microsoft YaHei UI", 12, "bold")
 class _HelpTip:
     """问号按钮 hover 提示（D7 延迟 hover + F2 渐隐动效）：
 
-    悬停 300ms 后淡入（200ms ease-out，窗口 alpha 0→1），移开后 2s 指数渐隐
-    （α=exp(-k·t/τ)，τ=0.51s，每 16ms 一帧，末段 α 阶梯 0.05/0.02/0 后销毁）；
+    悬停 300ms 后淡入（200ms ease-out，窗口 alpha 0→1），移开后 0.8s 指数渐隐
+    （α=exp(-k·t/τ)，τ=0.2s，每 16ms 一帧，末段 α 阶梯 0.05/0.02/0 后销毁）；
     渐隐期移回立即恢复 α=1；新提示出现时旧提示立即终止并销毁（全局互斥，
     后悬停者优先）。300ms 延迟是交互防误触，不受动效开关影响；淡入/渐隐
     受动效开关控制（关→瞬时显示/瞬时消失）。所有 after 帧回调在窗口销毁
     竞态下吞 TclError（winfo_exists 检查 + try/except）。
     """
 
-    _TAU = 0.51          # 指数渐隐时间常数：2s 末 α=exp(-2/0.51)≈0.02
+    _TAU = 0.2           # 指数渐隐时间常数（P3：2s→0.8s）：0.8s 末 α=exp(-0.8/0.2)≈0.018
     _FADE_MS = 16        # 淡入/渐隐帧间隔
     _FADE_IN_MS = 200    # 淡入时长
     _active = None       # 当前唯一活动提示实例（全局互斥）
@@ -622,7 +622,7 @@ class ControlGUI(ctk.CTk):
         # 动效引擎：注入 Tk after 作调度器（motion.py 纯数值模块）；
         # 必须在 _build_widgets 之前创建，D4 起的 hover 绑定会用到。
         # frame_ms=66：长驻动效（呼吸循环）降到约 15fps，重绘压力再减半；
-        # 160ms 的 hover 过渡此时约 2-3 帧仍可接受（ease-out 末段占大头），
+        # 100ms 的 hover 过渡此时约 1-2 帧仍可接受（ease-out 末段占大头），
         # 缩放/拖拽期间动画帧与 WM_CONFIGURE 的抢帧概率显著下降。
         self.anim = Animator(schedule=lambda fn, ms: self.after(ms, fn),
                              frame_ms=66)
@@ -665,15 +665,20 @@ class ControlGUI(ctk.CTk):
         self._resize_after = None
         self._last_geometry_snapshot = ""  # 窗口几何快照：区分真实缩放与内部布局重排
         self._layout_mutating = False      # 日志展开/折叠等布局突变期间禁滚动条切换
+        # P3 呼吸静止优先：最近交互时刻（<Motion>/<Key> 刷新）；超 30s 无交互
+        # 呼吸圆点停帧（停在当前色），用户一动即恢复。
+        self._last_interaction = time.monotonic()
         self.bind("<Configure>", self._on_configure)
+        self.bind_all("<Motion>", self._note_interaction)
+        self.bind_all("<Key>", self._note_interaction)
 
     # ---- 通用小组件 ----
     def _btn(self, parent, text, cmd, kind="ghost"):
         """kind: primary / ghost / danger-text。
 
         hover 动效（D4 + 指数渐隐）：native hover_color 固定为底色，颜色过渡完全由
-        <Enter>/<Leave> 驱动——进入 160ms ease-out 插到高亮并驻留（不回落）；
-        移出 2s 指数渐隐（α=exp(-t/τ), τ=0.67s, 每 16ms 一帧, α≤0.05 末帧定格
+        <Enter>/<Leave> 驱动——进入 100ms ease-out 插到高亮并驻留（不回落）；
+        移出 0.8s 指数渐隐（α=exp(-t/τ), τ=0.27s, 每 16ms 一帧, α≤0.05 末帧定格
         80ms 后直跳终态）；渐隐期移回中断渐隐、从当前色续插回高亮。动效关时
         瞬时切换（原生 hover 行为）。禁用态（t5 联动置灰）跳过动效。
         """
@@ -714,7 +719,7 @@ class ControlGUI(ctk.CTk):
         #   fade 在途渐隐帧的 after token（None = 无）；每帧自替换，token 同步
         #        登记进 self._hover_fades，供关窗/_restart_ui 统一取消
         hstate = {"aid": -1, "cur": None, "fade": None}
-        _FADE_TAU = 0.67   # 指数渐隐时间常数：2s 末 α=exp(-2/0.67)≈0.05
+        _FADE_TAU = 0.27   # 指数渐隐时间常数（P3：2s→0.8s）：0.8s 末 α=exp(-0.8/0.27)≈0.052
         _FADE_STOP = 0.05  # α 降到该值 → 定格 _FADE_HOLD 毫秒后直跳终态
         _FADE_HOLD = 80    # 末帧定格时长（ms，生动加分 2）
         _FADE_FRAME = 16   # 渐隐帧间隔（ms）
@@ -746,7 +751,7 @@ class ControlGUI(ctk.CTk):
             hstate["fade"] = None
 
         def _fade_enter(hover_col):
-            """进入 / 渐隐期移回：取消在途渐隐，从当前色续插回高亮（160ms ease-out）。"""
+            """进入 / 渐隐期移回：取消在途渐隐，从当前色续插回高亮（100ms ease-out）。"""
             _fade_cancel()
             if hstate["aid"] > 0:
                 self.anim.cancel(hstate["aid"])
@@ -774,12 +779,12 @@ class ControlGUI(ctk.CTk):
                     return
                 hstate["cur"] = hover_col
 
-            hstate["aid"] = self.anim.animate(_tick, 160, on_done=_done)
+            hstate["aid"] = self.anim.animate(_tick, 100, on_done=_done)
             if hstate["aid"] <= 0:  # 瞬时/降级：on_done 已同步执行
                 hstate["aid"] = -1
 
         def _fade_leave(final_col, back_to_transparent=False):
-            """移出：2s 指数渐隐 高亮→终态（手写 after 帧链，不用 Animator）。
+            """移出：0.8s 指数渐隐 高亮→终态（手写 after 帧链，不用 Animator）。
 
             每帧 α = exp(-t/τ)，t 取墙钟（time.monotonic，窗口卡顿时自然掉帧
             不拖长）；颜色 = lerp(终态, 高亮, α)。终态色先按亮度压 2%
@@ -884,7 +889,7 @@ class ControlGUI(ctk.CTk):
         if title:
             ctk.CTkLabel(inner, text=title, font=F_GROUP, text_color=C_MUT,
                          anchor="w").pack(fill="x", pady=(0, 8))
-        # 卡片 hover 抬升（D4，动效 2）：边框从 C_BORDER 插到浅蓝再插回，200ms
+        # 卡片 hover 抬升（D4，动效 2）：边框从 C_BORDER 插到浅蓝再插回，120ms
         hover_border = "#cfe6ff" if ctk.get_appearance_mode() == "Light" else "#0a84ff"
 
         def _tick(p):
@@ -893,7 +898,7 @@ class ControlGUI(ctk.CTk):
 
         def _enter(_):
             if self._motion_on():
-                self.anim.animate(_tick, 200)  # -1 降级即同步终态
+                self.anim.animate(_tick, 120)  # -1 降级即同步终态
             else:
                 fr.configure(border_color=hover_border)  # 动效关：瞬切
 
@@ -903,7 +908,7 @@ class ControlGUI(ctk.CTk):
                     t = ease_out_cubic(p, 1)
                     fr.configure(border_color=format_hex(lerp(hover_border, C_BORDER, t)))
 
-                self.anim.animate(_back, 200)  # -1 降级即同步终态
+                self.anim.animate(_back, 120)  # -1 降级即同步终态
             else:
                 fr.configure(border_color=C_BORDER)
 
@@ -1358,14 +1363,22 @@ class ControlGUI(ctk.CTk):
         _update_status_dot 会 cancel 掉当前 id 并置 _breathing=False，循环自然终止。
         animate() 返回 -1（瞬时/降级）时不进注册表：id 直接置 -1，on_done 已同步
         执行（_breath_loop 再入时若 _breathing 仍真则继续下一轮）。
+
+        P3 静止优先（苹果式克制）：超 _BREATH_IDLE_S 秒无交互（_note_interaction
+        刷新）则帧跳过、圆点停在当前色，呼吸循环仍在跑——用户一动鼠标即自然
+        恢复脉动，无需状态机切换。
         """
         def _frame(p):
             if getattr(self, "_resizing", False):
                 return  # 缩放期间跳过帧（颜色停在当前值，缩放结束续跑）
+            if (time.monotonic() - getattr(self, "_last_interaction", 0.0)
+                    > _BREATH_IDLE_S):
+                return  # 静止优先：30s 无交互停帧（圆点停在当前色，动鼠标即恢复）
             amp = 0.12 * (0.5 - 0.5 * math.cos(2 * math.pi * p))
             self.dot_state.configure(
                 text_color=format_hex(lerp(C_RUN, _breath_peak, amp)))
 
+        _BREATH_IDLE_S = 30  # P3：30s 无交互呼吸停帧（帧内判定，循环不终止）
         if not self._breathing or self._breath_busy:
             return
         _breath_peak = "#ffffff" if ctk.get_appearance_mode() == "Light" else "#000000"
@@ -1928,6 +1941,14 @@ class ControlGUI(ctk.CTk):
                     lbl.configure(wraplength=w)
         except Exception:  # noqa: BLE001 - 重建竞态下静默
             pass
+
+    def _note_interaction(self, _=None):
+        """P3 呼吸静止优先：任何鼠标移动/按键都刷新最近交互时刻。
+
+        呼吸循环的帧内判定（超 30s 停帧）据此恢复/暂停——不动状态机，
+        只在 _breath_loop 里跳过写色，循环本身不断。
+        """
+        self._last_interaction = time.monotonic()
 
     def _on_configure(self, event=None):
         """缩放/拖拽防抖（缩放卡顿修复）：置 _resizing 并重置 300ms 定时器；
