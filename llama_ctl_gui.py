@@ -1890,16 +1890,11 @@ class ControlGUI(ctk.CTk):
 
     def _on_configure(self, _event=None):
         """缩放/拖拽防抖（缩放卡顿修复）：置 _resizing 并重置 300ms 定时器；
-        连续 WM_CONFIGURE 期间 _drain_status/_poll_log 跳过 UI 应用，
-        隐藏参数区滚动条（profiler 显示 CTkScrollbar._draw 是缩放最大热点），
-        缩放停止 300ms 后自动恢复。"""
+        连续 WM_CONFIGURE 期间 _drain_status/_poll_log 跳过 UI 应用。
+        注意：不在此处隐藏滚动条——展开日志面板等任何布局重排都会触发
+        Configure，隐藏/恢复滚动条会形成「Configure→隐藏→重排→Configure」
+        的振荡循环（日志面板持续抽动的根因）。滚动条保持常驻。"""
         self._resizing = True
-        try:
-            sb = getattr(self.scroll, "_scrollbar", None)
-            if sb is not None and sb.winfo_manager() == "grid":
-                sb.grid_remove()  # 隐藏滚动条：CTkScrollbar._draw 是缩放热点之一
-        except Exception:  # noqa: BLE001
-            pass
         if self._resize_after is not None:
             try:
                 self.after_cancel(self._resize_after)
@@ -1910,12 +1905,6 @@ class ControlGUI(ctk.CTk):
     def _resize_done(self):
         self._resizing = False
         self._resize_after = None
-        try:
-            sb = getattr(self.scroll, "_scrollbar", None)
-            if sb is not None and sb.winfo_manager() == "":
-                sb.grid(row=1, column=1, sticky="nsew")  # 恢复滚动条（grid 布局）
-        except Exception:  # noqa: BLE001
-            pass
 
     def _drain_status(self):
         """主线程消费 _status_r：应用状态/探活/按钮联动/dirty 提示。
