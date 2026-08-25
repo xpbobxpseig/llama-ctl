@@ -6,3 +6,7 @@ __pycache__/
 presets.json
 settings.json
 *.tmp
+
+# 交互动效冒烟脚本（真实 Tk 驱动验证，F1/F2 回归用，不进仓库）
+_smoke_d9.py
+_smoke_f2.py
