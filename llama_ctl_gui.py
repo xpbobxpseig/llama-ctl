@@ -619,11 +619,11 @@ class ControlGUI(ctk.CTk):
         self._log_q = queue.Queue()
         # 动效引擎：注入 Tk after 作调度器（motion.py 纯数值模块）；
         # 必须在 _build_widgets 之前创建，D4 起的 hover 绑定会用到。
-        # frame_ms=33：动画帧率降到 30fps（呼吸循环等长驻动效的主线程
-        # 重绘压力减半；瞬时过渡类 160ms 时长仍平滑）。拖拽/缩放窗口期间
-        # 动画会继续跑，靠 worker 化的探活与更少帧数避免卡顿。
+        # frame_ms=66：长驻动效（呼吸循环）降到约 15fps，重绘压力再减半；
+        # 160ms 的 hover 过渡此时约 2-3 帧仍可接受（ease-out 末段占大头），
+        # 缩放/拖拽期间动画帧与 WM_CONFIGURE 的抢帧概率显著下降。
         self.anim = Animator(schedule=lambda fn, ms: self.after(ms, fn),
-                             frame_ms=33)
+                             frame_ms=66)
         # 状态圆点动效状态（D3）：呼吸/错误闪烁的注册 id 与守卫标志
         self._breathing = False      # 呼吸循环是否应持续
         self._breath_id = -1         # 当前呼吸动画 id（-1 = 无）
@@ -657,6 +657,11 @@ class ControlGUI(ctk.CTk):
         self.refresh_all()
         self._start_polling()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        # 缩放/拖拽防抖：WM_CONFIGURE 高频触发期间挂起 UI 应用与日志渲染，
+        # 停止 300ms 后恢复（缩放卡顿修复）。
+        self._resizing = False
+        self._resize_after = None
+        self.bind("<Configure>", self._on_configure)
 
     # ---- 通用小组件 ----
     def _btn(self, parent, text, cmd, kind="ghost"):
@@ -1333,6 +1338,8 @@ class ControlGUI(ctk.CTk):
         执行（_breath_loop 再入时若 _breathing 仍真则继续下一轮）。
         """
         def _frame(p):
+            if getattr(self, "_resizing", False):
+                return  # 缩放期间跳过帧（颜色停在当前值，缩放结束续跑）
             amp = 0.12 * (0.5 - 0.5 * math.cos(2 * math.pi * p))
             self.dot_state.configure(
                 text_color=format_hex(lerp(C_RUN, _breath_peak, amp)))
@@ -1424,7 +1431,7 @@ class ControlGUI(ctk.CTk):
         host = self.var["host"].get().strip() or "127.0.0.1"
         port = self.var["port"].get().strip() or "8080"
         try:
-            self._status_q.put(("refresh", self.service, host, port))
+            self._status_q.put(("refresh", self.service, host, port, None))
         except Exception:  # noqa: BLE001
             pass
 
@@ -1764,6 +1771,9 @@ class ControlGUI(ctk.CTk):
     def _poll_log(self):
         if self._stop_poll:
             return
+        if getattr(self, "_resizing", False):
+            self.after(1500, self._poll_log)  # 缩放期间跳过读文件+渲染
+            return
         try:
             log_path = self._log_path()
             if log_path and os.path.exists(log_path):
@@ -1834,22 +1844,17 @@ class ControlGUI(ctk.CTk):
         # 轻量防堆积：worker 没消费完就跳过一次派活（服务状态变化不丢，
         # 只是延迟一拍，drain 立即触发下一轮）
         if self._status_q.qsize() < 2:
-            self._status_q.put(("poll", svc, host, port))
+            try:
+                snapshot = self._collect()[0]   # 主线程读 Tk 变量（安全）
+            except Exception:  # noqa: BLE001
+                snapshot = None
+            self._status_q.put(("poll", svc, host, port, snapshot))
         self.after(3000, self._poll_health)
 
     def _dirty_cached(self):
-        """主线程缓存的 dirty 计算（拖拽卡顿修复）：_dirty() 是重活（spawn
-        nssm.exe + 全文拼串），每 6 秒最多重算一次；其余时间复用缓存值。
-        表单被编辑/载入/写回时会失效缓存（见各处 dirty 触发点）。"""
-        if self._stop_poll:
-            return False
-        try:
-            if self._dirty_cache is None or (time.monotonic() - self._dirty_at > 6.0):
-                self._dirty_cache = self._dirty()
-                self._dirty_at = time.monotonic()
-            return self._dirty_cache
-        except Exception:  # noqa: BLE001
-            return self._dirty_cache if self._dirty_cache is not None else False
+        """主线程 dirty 读取（纯缓存，绝不阻塞）：真正的 nssm 对比由 worker
+        完成并回传。缩放/拖拽期间主线程永远不 spawn 子进程。"""
+        return self._dirty_cache if self._dirty_cache is not None else False
 
     def _status_worker_loop(self):
         """探活 worker（daemon）：所有同步阻塞调用都在这条线程里。
@@ -1862,18 +1867,55 @@ class ControlGUI(ctk.CTk):
                 continue
             if item is None:
                 break
-            tag, svc, host, port = item
+            tag, svc, host, port, snapshot = item
             try:
                 if tag in ("poll", "refresh"):
                     state = sc_query_state(svc)
                     ok, detail = (False, "未探活") if state != "RUNNING" else check_health(host, port)
-                    self._status_r.put(("result", state, ok, detail, None))
+                    dirty = None
+                    if snapshot is not None:
+                        try:
+                            cur = get_app_parameters(svc)
+                            dirty = build_params(snapshot, self.extras, FIELDS) != cur
+                        except Exception:  # noqa: BLE001
+                            dirty = None
+                    self._status_r.put(("result", state, ok, detail, dirty))
             except Exception as exc:  # noqa: BLE001 - worker 任何异常不致死循环
                 self._status_r.put(("result", "UNKNOWN", False, f"worker 异常: {exc}", None))
 
+    def _on_configure(self, _event=None):
+        """缩放/拖拽防抖（缩放卡顿修复）：置 _resizing 并重置 300ms 定时器；
+        连续 WM_CONFIGURE 期间 _drain_status/_poll_log 跳过 UI 应用，
+        隐藏参数区滚动条（profiler 显示 CTkScrollbar._draw 是缩放最大热点），
+        缩放停止 300ms 后自动恢复。"""
+        self._resizing = True
+        try:
+            sb = getattr(self.scroll, "_scrollbar", None)
+            if sb is not None and sb.winfo_manager() == "grid":
+                sb.grid_remove()  # 隐藏滚动条：CTkScrollbar._draw 是缩放热点之一
+        except Exception:  # noqa: BLE001
+            pass
+        if self._resize_after is not None:
+            try:
+                self.after_cancel(self._resize_after)
+            except Exception:  # noqa: BLE001
+                pass
+        self._resize_after = self.after(300, self._resize_done)
+
+    def _resize_done(self):
+        self._resizing = False
+        self._resize_after = None
+        try:
+            sb = getattr(self.scroll, "_scrollbar", None)
+            if sb is not None and sb.winfo_manager() == "":
+                sb.grid(row=1, column=1, sticky="nsew")  # 恢复滚动条（grid 布局）
+        except Exception:  # noqa: BLE001
+            pass
+
     def _drain_status(self):
-        """主线程消费 _status_q：应用状态/探活/按钮联动/dirty 提示。
-        节流合并（一次 drain 处理全部积压），拖拽期间 after 队列排队自然错开。"""
+        """主线程消费 _status_r：应用状态/探活/按钮联动/dirty 提示。
+        节流合并（一次 drain 处理全部积压）；窗口缩放/拖拽期间（_resizing）
+        跳过 UI 应用，避免与 WM_CONFIGURE 高频重排抢主线程。"""
         if self._stop_poll:
             return
         got = None
@@ -1884,6 +1926,9 @@ class ControlGUI(ctk.CTk):
                     got = item
         except queue.Empty:
             pass
+        if getattr(self, "_resizing", False):
+            self.after(500, self._drain_status)
+            return
         if got is not None:
             _, state, ok, detail, dirty = got
             try:
@@ -1906,16 +1951,15 @@ class ControlGUI(ctk.CTk):
                 else:
                     self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
                     self._update_status_dot(state, True)
-                # dirty 由主线程缓存重算（_dirty_cached，6s 降频），不依赖 worker 回传
+                # dirty 由 worker 用表单快照 + nssm 对比回传（主线程永不 spawn nssm）
                 if got[4] is not None:
-                    dirty = got[4]
-                else:
-                    dirty = self._dirty_cached()
+                    self._dirty_cache = got[4]
+                dirty = self._dirty_cached()
                 self.lbl_dirty.configure(text="● 有未应用的更改" if dirty else "")
                 self.btn_revert.configure(state="normal" if dirty else "disabled")
             except Exception:  # noqa: BLE001 - 控件销毁竞态静默
                 pass
-        self.after(150, self._drain_status)
+        self.after(400, self._drain_status)
 
     def _on_close(self):
         self._stop_poll = True
