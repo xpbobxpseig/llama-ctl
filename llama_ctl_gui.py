@@ -660,11 +660,16 @@ class ControlGUI(ctk.CTk):
             base, hover = C_RED, "#fdeceb"
         else:
             base, hover = C_TXT, C_CARD
+        # hover=False：禁用 CTkButton 原生 hover 状态机（其 _on_enter/_on_leave
+        # 用 canvas.itemconfig 直接画 inner_parts，绕过 fg_color——与我们的
+        # 16ms 动画帧交替重绘会深/浅爆闪）。视觉完全由 _fade_enter/_fade_leave
+        # 驱动；动效关时 _fade_enter 的非 motion 分支做瞬时切换，行为等价。
         if kind == "primary":
-            kw.update(fg_color=base, hover_color=base, text_color="#ffffff")
+            kw.update(fg_color=base, hover_color=hover, text_color="#ffffff",
+                      hover=False)
         else:
-            kw.update(fg_color="transparent", hover_color=base, text_color=base,
-                      border_width=1, border_color=C_BORDER)
+            kw.update(fg_color="transparent", hover_color=hover, text_color=base,
+                      border_width=1, border_color=C_BORDER, hover=False)
         btn = ctk.CTkButton(parent, text=text, command=cmd, **kw)
 
         # hover 动效状态（闭包）：
