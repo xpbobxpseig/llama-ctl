@@ -2159,6 +2159,10 @@ class ControlGUI(ctk.CTk):
         self.title(t("app.title"))
         self.configure(fg_color=C_BG)
         self._build_widgets()
+        # P2：重建后 hint/warn 是全新控件，wraplength 归零——重建末重调一次
+        # 动态折行（无窗口尺寸变化的语言切换也会走到这里；真实缩放仍由
+        # _on_configure 的 real_resize 分支驱动）
+        self._sync_wraplengths()
         self.refresh_all()
 
 
