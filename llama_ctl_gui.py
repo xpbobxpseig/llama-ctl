@@ -1700,9 +1700,13 @@ class ControlGUI(ctk.CTk):
             self._log_anim_id = -1
         if self._log_open.get():
             self.btn_log_toggle.configure(text=t("log.expanded"), text_color=C_TXT)
-            self.txt_log.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+            # 关键：动画期间用 fill="x"（高度由 configure(height) 控制），
+            # 不能用 expand=True——pack 的 expand 会每帧把高度拉回可用空间，
+            # 与动画的 height 写入打架形成高频抽动。动画完成后才切 expand。
+            self.txt_log.pack(fill="x", padx=14, pady=(0, 12))
             if not self._motion_on():
                 self.txt_log.configure(height=170)
+                self.txt_log.pack_configure(fill="both", expand=True)
                 return
             self.txt_log.configure(height=40)
 
@@ -1713,6 +1717,7 @@ class ControlGUI(ctk.CTk):
             def _open_done():
                 self._log_anim_id = -1
                 self.txt_log.configure(height=170)
+                self.txt_log.pack_configure(fill="both", expand=True)  # 动画结束才撑满
 
             self._log_anim_id = self.anim.animate(_open_frame, 180, on_done=_open_done)
             if self._log_anim_id <= 0:  # 瞬时/降级：on_done 已同步执行
