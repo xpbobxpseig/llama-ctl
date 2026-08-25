@@ -144,6 +144,7 @@ class Animator:
     now: 可注入时钟，默认 time.monotonic（返回秒）；last_frame_ms 与进度计算都用它。
     max_active: 活动动画数超过该值时新动画降级为瞬时完成（默认 8）。
     frame_budget_ms: 上一帧回调实际耗时超过该值时新动画降级（默认 50）。
+    frame_ms: 帧间隔毫秒（默认 16）；长驻动效建议放宽以降低主线程重绘压力。
     """
 
     FRAME_MS = 16  # 帧间隔（约 60fps），与设计规范 after(16) 一致
@@ -152,11 +153,15 @@ class Animator:
                  schedule: Optional[Callable[[Callable[[], None], int], Any]] = None,
                  now: Optional[Callable[[], float]] = None,
                  max_active: int = 8,
-                 frame_budget_ms: float = 50.0):
+                 frame_budget_ms: float = 50.0,
+                 frame_ms: int = 16):
         self.schedule = schedule if schedule is not None else _no_schedule
         self.now = now if now is not None else time.monotonic
         self.max_active = max_active
         self.frame_budget_ms = frame_budget_ms
+        # 帧间隔（毫秒）。GUI 长驻动效（呼吸循环）可放宽到 33-50ms 降低
+        # 主线程重绘压力；瞬时过渡类保持默认 16ms。
+        self.frame_ms = frame_ms
         # 活跃动画注册表：anim_id -> (开始时间, duration_ms)
         self._active: Dict[int, Tuple[float, float]] = {}
         # anim_id -> (callback, on_done)（回调与注册表分离，注册表保持纯时序数据）
@@ -218,7 +223,7 @@ class Animator:
         p = min(1.0, max(0.0, elapsed_ms / duration))
         self._frame(anim_id, p)
         if anim_id in self._active:
-            self.schedule(lambda: self._step(anim_id, start, duration), self.FRAME_MS)
+            self.schedule(lambda: self._step(anim_id, start, duration), self.frame_ms)
 
     # -- 公开 API -----------------------------------------------------------
 
@@ -243,7 +248,7 @@ class Animator:
         self._active[anim_id] = (start, float(duration_ms))
         self._hooks[anim_id] = (callback, on_done)
         # 用注入的 schedule 自调度第一帧（每帧 schedule(step, 16)），不依赖 Tk after 也不开线程。
-        self.schedule(lambda: self._step(anim_id, start, float(duration_ms)), self.FRAME_MS)
+        self.schedule(lambda: self._step(anim_id, start, float(duration_ms)), self.frame_ms)
         return anim_id
 
     def cancel(self, anim_id: int) -> bool:

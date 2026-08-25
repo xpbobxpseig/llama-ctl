@@ -619,7 +619,11 @@ class ControlGUI(ctk.CTk):
         self._log_q = queue.Queue()
         # 动效引擎：注入 Tk after 作调度器（motion.py 纯数值模块）；
         # 必须在 _build_widgets 之前创建，D4 起的 hover 绑定会用到。
-        self.anim = Animator(schedule=lambda fn, ms: self.after(ms, fn))
+        # frame_ms=33：动画帧率降到 30fps（呼吸循环等长驻动效的主线程
+        # 重绘压力减半；瞬时过渡类 160ms 时长仍平滑）。拖拽/缩放窗口期间
+        # 动画会继续跑，靠 worker 化的探活与更少帧数避免卡顿。
+        self.anim = Animator(schedule=lambda fn, ms: self.after(ms, fn),
+                             frame_ms=33)
         # 状态圆点动效状态（D3）：呼吸/错误闪烁的注册 id 与守卫标志
         self._breathing = False      # 呼吸循环是否应持续
         self._breath_id = -1         # 当前呼吸动画 id（-1 = 无）
@@ -637,6 +641,17 @@ class ControlGUI(ctk.CTk):
         # D8 折叠分组：展开状态（_restart_ui 重建后保留，默认仅第一组展开）
         self.group_open = {}
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
+        # 探活 worker（拖拽卡顿修复）：所有同步阻塞的 nssm/sc/urlopen 移出
+        # 主线程。请求走 _status_q（主→worker），结果走 _status_r（worker→主）；
+        # 两条队列分离，避免 worker 把自己的 result 当请求消费。
+        self._status_q = queue.Queue()
+        self._status_r = queue.Queue()
+        self._status_worker = threading.Thread(target=self._status_worker_loop,
+                                               daemon=True)
+        # dirty 主线程缓存（worker 线程不能读 Tk 变量）：6s 降频重算，
+        # 表单编辑/载入/写回时失效
+        self._dirty_cache = None
+        self._dirty_at = 0.0
 
         self._build_widgets()
         self.refresh_all()
@@ -1162,6 +1177,7 @@ class ControlGUI(ctk.CTk):
         时直接 return，防启动加载全屏闪。
         """
         def _on_write(*_):
+            self._dirty_cache = None  # 用户改字段：dirty 缓存立即失效
             if self._suppress_trace:
                 return
             self._flash_field(key)
@@ -1403,20 +1419,14 @@ class ControlGUI(ctk.CTk):
                 text_color=C_STOP if state == "STOPPED" else C_ORG)
 
     def refresh_status(self):
-        state = sc_query_state(self.service)
-        self.lbl_state.configure(text=fmt("status.svc", st=state),
-                                 text_color=self._state_color(state))
+        """派活给 worker（拖拽卡顿修复）：不再同步 sc_query_state/check_health。
+        结果由 _drain_status 应用；worker 未启动时（极早期）直接排队。"""
         host = self.var["host"].get().strip() or "127.0.0.1"
         port = self.var["port"].get().strip() or "8080"
-        if state == "RUNNING":
-            ok, detail = check_health(host, port)
-            self.lbl_health.configure(
-                text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
-                text_color=C_RUN if ok else C_RED)
-            self._update_status_dot(state, ok)
-        else:
-            self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
-            self._update_status_dot(state, True)
+        try:
+            self._status_q.put(("refresh", self.service, host, port))
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---- 参数读写 ----
     def _apply_values(self, values, warnings=None):
@@ -1450,6 +1460,7 @@ class ControlGUI(ctk.CTk):
         values, extras, warnings = parse_params(text, FIELDS)
         self.extras = extras
         self._apply_values(values, warnings)
+        self._dirty_cache = None  # 载入后表单=服务，dirty 缓存失效待重算
 
     # ---- 预设 ----
     def refresh_presets(self):
@@ -1746,6 +1757,8 @@ class ControlGUI(ctk.CTk):
     def _start_polling(self):
         self._drain_log()
         self._poll_log()
+        self._status_worker.start()
+        self._drain_status()
         self._poll_health()
 
     def _poll_log(self):
@@ -1810,39 +1823,99 @@ class ControlGUI(ctk.CTk):
             return ERR_LOG
 
     def _poll_health(self):
+        """纯调度器（拖拽卡顿修复）：只派活给 worker，不做任何同步阻塞。
+        全部 nssm/sc/urlopen 调用移入 _status_worker_loop（daemon 线程），
+        结果经 _status_q 回主线程，由 _drain_status 应用 UI。"""
         if self._stop_poll:
             return
-        # 未应用更改提示 + 启停/还原按钮联动（异常时保持按钮原状）
-        try:
-            dirty = self._dirty()
-            self.lbl_dirty.configure(text="● 有未应用的更改" if dirty else "")
-            self.btn_revert.configure(state="normal" if dirty else "disabled")
-        except Exception:  # noqa: BLE001
-            pass
-        state = sc_query_state(self.service)
-        # 服务状态 → 启停按钮禁用联动（过渡态双禁，防误操作）
-        if state == "RUNNING":
-            self.btn_start.configure(state="disabled")
-            self.btn_stop.configure(state="normal")
-        elif state == "STOPPED":
-            self.btn_start.configure(state="normal")
-            self.btn_stop.configure(state="disabled")
-        else:
-            self.btn_start.configure(state="disabled")
-            self.btn_stop.configure(state="disabled")
-        if state == "RUNNING":
-            ok, detail = check_health(self.var["host"].get().strip() or "127.0.0.1",
-                                      self.var["port"].get().strip() or "8080")
-            self.lbl_health.configure(
-                text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
-                text_color=C_RUN if ok else C_RED)
-            self._update_status_dot(state, ok)
-        else:
-            self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
-            self._update_status_dot(state, True)
-        self.lbl_state.configure(text=fmt("status.svc", st=state),
-                                 text_color=self._state_color(state))
+        svc = self.service
+        host = self.var["host"].get().strip() or "127.0.0.1"
+        port = self.var["port"].get().strip() or "8080"
+        # 轻量防堆积：worker 没消费完就跳过一次派活（服务状态变化不丢，
+        # 只是延迟一拍，drain 立即触发下一轮）
+        if self._status_q.qsize() < 2:
+            self._status_q.put(("poll", svc, host, port))
         self.after(3000, self._poll_health)
+
+    def _dirty_cached(self):
+        """主线程缓存的 dirty 计算（拖拽卡顿修复）：_dirty() 是重活（spawn
+        nssm.exe + 全文拼串），每 6 秒最多重算一次；其余时间复用缓存值。
+        表单被编辑/载入/写回时会失效缓存（见各处 dirty 触发点）。"""
+        if self._stop_poll:
+            return False
+        try:
+            if self._dirty_cache is None or (time.monotonic() - self._dirty_at > 6.0):
+                self._dirty_cache = self._dirty()
+                self._dirty_at = time.monotonic()
+            return self._dirty_cache
+        except Exception:  # noqa: BLE001
+            return self._dirty_cache if self._dirty_cache is not None else False
+
+    def _status_worker_loop(self):
+        """探活 worker（daemon）：所有同步阻塞调用都在这条线程里。
+        nssm.exe / sc / urlopen 卡住不会冻结主线程；结果 put 回 _status_q。"""
+        import json as _json
+        while not self._stop_poll:
+            try:
+                item = self._status_q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if item is None:
+                break
+            tag, svc, host, port = item
+            try:
+                if tag in ("poll", "refresh"):
+                    state = sc_query_state(svc)
+                    ok, detail = (False, "未探活") if state != "RUNNING" else check_health(host, port)
+                    self._status_r.put(("result", state, ok, detail, None))
+            except Exception as exc:  # noqa: BLE001 - worker 任何异常不致死循环
+                self._status_r.put(("result", "UNKNOWN", False, f"worker 异常: {exc}", None))
+
+    def _drain_status(self):
+        """主线程消费 _status_q：应用状态/探活/按钮联动/dirty 提示。
+        节流合并（一次 drain 处理全部积压），拖拽期间 after 队列排队自然错开。"""
+        if self._stop_poll:
+            return
+        got = None
+        try:
+            while True:
+                item = self._status_r.get_nowait()
+                if item and item[0] == "result":
+                    got = item
+        except queue.Empty:
+            pass
+        if got is not None:
+            _, state, ok, detail, dirty = got
+            try:
+                if state == "RUNNING":
+                    self.btn_start.configure(state="disabled")
+                    self.btn_stop.configure(state="normal")
+                elif state == "STOPPED":
+                    self.btn_start.configure(state="normal")
+                    self.btn_stop.configure(state="disabled")
+                else:
+                    self.btn_start.configure(state="disabled")
+                    self.btn_stop.configure(state="disabled")
+                self.lbl_state.configure(text=fmt("status.svc", st=state),
+                                         text_color=self._state_color(state))
+                if state == "RUNNING":
+                    self.lbl_health.configure(
+                        text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
+                        text_color=C_RUN if ok else C_RED)
+                    self._update_status_dot(state, ok)
+                else:
+                    self.lbl_health.configure(text=t("health.down"), text_color=C_GRAY)
+                    self._update_status_dot(state, True)
+                # dirty 由主线程缓存重算（_dirty_cached，6s 降频），不依赖 worker 回传
+                if got[4] is not None:
+                    dirty = got[4]
+                else:
+                    dirty = self._dirty_cached()
+                self.lbl_dirty.configure(text="● 有未应用的更改" if dirty else "")
+                self.btn_revert.configure(state="normal" if dirty else "disabled")
+            except Exception:  # noqa: BLE001 - 控件销毁竞态静默
+                pass
+        self.after(150, self._drain_status)
 
     def _on_close(self):
         self._stop_poll = True
