@@ -1531,6 +1531,22 @@ class ControlGUI(ctk.CTk):
         self.refresh_presets()
         self.preset_var.set(name)
 
+    def _sync_preset_with_form(self):
+        """应用成功后同步预设：若当前下拉是已存在的预设名，用刚写回服务的
+        表单覆盖该预设，保持「预设 = 服务当前参数」。
+
+        防漂移（用户改路径/参数后只点应用、忘记另存预设 → 旧预设残留旧
+        路径，下次载入会把服务指回坏文件）。新名字由 _on_preset_committed
+        的输入路径负责保存，这里不动；空名或未知名也不动。
+        """
+        name = self.preset_var.get().strip()
+        if not name or name not in load_presets():
+            return
+        values, _ = self._collect()
+        presets = load_presets()
+        presets[name] = values
+        save_presets(presets)
+
     def load_preset(self, name=None):
         """按名载入预设到表单（无弹窗）。"""
         name = name or self.preset_var.get()
@@ -1640,6 +1656,9 @@ class ControlGUI(ctk.CTk):
             return
         # 应用成功即时反馈（D4）：按钮短变绿 240ms 后插回原色（无论运行/未运行）
         self._flash_applied()
+        # 写回成功后，当前下拉若对应已存在预设，同步覆盖该预设，防止表单改动
+        # 只写回服务而预设仍留旧路径（下次载入会把服务指回坏文件）。
+        self._sync_preset_with_form()
         if state == "RUNNING":
             self.do_restart()
         else:
