@@ -982,8 +982,15 @@ class ControlGUI(ctk.CTk):
         self.btn_apply.pack(side="right", padx=(0, 8))
         base = _resource_dir()
         try:
-            ic_del = ctk.CTkImage(PILImage.open(os.path.join(base, "ic_trash.png")), size=(18, 18))
-        except Exception:  # noqa: BLE001 - 图标缺失退化为文字
+            _im = PILImage.open(os.path.join(base, "ic_trash.png")).convert("RGBA")
+            _im.load()
+            # 图标重绘（P2-9）：文件重绘为 72x144（上=亮色层、下=暗色层，
+            # 18px 逻辑尺寸的 4x 超采样矢量级绘制）。CTkImage 按 DPI 缩放到
+            # 18/27px 时从高清源降采样，取代原 32px 位图近邻直缩的发虚边缘。
+            ic_del = ctk.CTkImage(light_image=_im.crop((0, 0, 72, 72)),
+                                  dark_image=_im.crop((0, 72, 72, 144)),
+                                  size=(18, 18))
+        except Exception:  # noqa: BLE001 - 图标缺失/损坏退化为文字
             ic_del = None
         self.preset_var = tk.StringVar()
         self.cmb_preset = ctk.CTkComboBox(prow, variable=self.preset_var, values=[],
