@@ -18,6 +18,7 @@ import json
 import math
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -35,6 +36,8 @@ from params import parse_params, build_params
 from settings import load_settings, save_settings
 from motion import Animator, format_hex, lerp, parse_hex, ease_out_cubic, ease_in_cubic
 import strings
+import updater
+from updater import UpdateError
 from strings import t, fmt
 
 
@@ -58,6 +61,13 @@ ERR_LOG = r"F:\llama.cpp\server.err"
 # 统一固定到 F:\llama_ctl\presets.json：exe 在 dist\ 下运行也读写同一份，
 # 避免「exe 换目录/升级后预设丢失」与双副本分裂。
 PRESETS_FILE = r"F:\llama_ctl\presets.json"
+# llama.cpp 安装目录（官方更新替换目标）：默认固定本机路径，检查时优先按
+# NSSM AppDirectory 推导（与服务实际指向保持一致）。
+LLAMA_DIR = r"F:\llama.cpp"
+LLAMA_SERVER_EXE = os.path.join(LLAMA_DIR, "llama-server.exe")
+# 官方资产下载缓存与旧文件备份根目录
+UPD_DOWNLOAD_DIR = r"F:\llama_ctl\downloads"
+UPD_BACKUP_ROOT = r"F:\llama_ctl\backup"
 CPU_THREADS = os.cpu_count() or 8
 
 # ---------------------------------------------------------------------------
@@ -73,31 +83,46 @@ CPU_THREADS = os.cpu_count() or 8
 FIELDS = [
     # ---- 模型与视觉 ----
     {"key": "model", "group": "模型与视觉", "kind": "path",
-     "label": "模型文件 (-m/--model)", "aliases": ["-m", "--model"],
+     "label": "模型文件 (-m/--model)", "label_en": "Model file (-m/--model)",
+     "aliases": ["-m", "--model"],
      "help": "要加载的 GGUF 模型文件路径。这是最核心的参数——决定用哪个开源模型（如 Qwen、Llama、DeepSeek、GLM 等）。"
-             " 模型越大、量化越高，占显存越多、效果与速度各异。路径必须是本机存在的 .gguf 文件。"},
+             " 模型越大、量化越高，占显存越多、效果与速度各异。路径必须是本机存在的 .gguf 文件。",
+     "help_en": "Path to the GGUF model to load. The most important setting: it decides which open model is served "
+             "(Qwen, Llama, DeepSeek, GLM, etc.). Bigger or higher-quantization models use more VRAM. "
+             "The file must exist on this machine."},
 
     {"key": "mmproj", "group": "模型与视觉", "kind": "path",
-     "label": "视觉投影 (--mmproj)", "aliases": ["--mmproj", "-mm"],
+     "label": "视觉投影 (--mmproj)", "label_en": "Vision projector (--mmproj)",
+     "aliases": ["--mmproj", "-mm"],
      "help": "多模态投影文件（.gguf）。仅当模型支持看图/传图时才需要，例如 Qwen-VL 类模型。"
-             " 填了之后服务才能接收图片。纯文本模型留空即可。"},
+             " 填了之后服务才能接收图片。纯文本模型留空即可。",
+     "help_en": "Multimodal projector file (.gguf). Only needed for vision models such as Qwen-VL. "
+             "Leave empty for text-only models."},
 
     {"key": "alias", "group": "模型与视觉", "kind": "text",
-     "label": "模型别名 (-a/--alias)", "aliases": ["-a", "--alias"],
+     "label": "模型别名 (-a/--alias)", "label_en": "Model alias (-a/--alias)",
+     "aliases": ["-a", "--alias"],
      "help": "给模型起一个对外暴露的名字（逗号可分隔多个）。调用 OpenAI 兼容 API 时用它做 model 字段，方便区分。"
-             " 例如 qwen3.8-27b。可留空，服务会用模型自带 id。"},
+             " 例如 qwen3.8-27b。可留空，服务会用模型自带 id。",
+     "help_en": "Name(s) exposed by the server for this model (comma-separated). Used as the model field in "
+             "OpenAI-compatible API calls, e.g. qwen3.8-27b. Leave empty to use the model's own ID."},
 
     # ---- 加速（GPU / 投机解码）----
     {"key": "ngl", "group": "加速", "kind": "slider",
-     "label": "GPU 层数 (-ngl)", "aliases": ["-ngl", "--n-gpu-layers", "--gpu-layers"],
-     "min": 0, "max": 200, "step": 1, "unit": "层",
+     "label": "GPU 层数 (-ngl)", "label_en": "GPU layers (-ngl)",
+     "aliases": ["-ngl", "--n-gpu-layers", "--gpu-layers"],
+     "min": 0, "max": 200, "step": 1, "unit": "层", "unit_en": "layers",
      "default": 99,
      "help": "把多少层模型权重放到显卡显存里。数值越大越快（显存够时尽量拉满）。"
              " 设 0 = 纯 CPU 推理（极慢）。设 99 表示尽量全部上 GPU。"
-             " 若显存不足会 OOM 崩溃，此时调小。效果无影响，只影响速度。"},
+             " 若显存不足会 OOM 崩溃，此时调小。效果无影响，只影响速度。",
+     "help_en": "How many model layers to offload to the GPU. Higher is faster (raise it as long as VRAM allows). "
+             "0 = CPU-only inference (very slow); 99 = offload as much as possible. "
+             "Lower it if you run out of VRAM. Quality is unaffected; only speed changes."},
 
     {"key": "spec_type", "group": "加速", "kind": "combo",
-     "label": "投机解码 (-spec-type)", "aliases": ["--spec-type"],
+     "label": "投机解码 (-spec-type)", "label_en": "Speculative decoding (-spec-type)",
+     "aliases": ["--spec-type"],
      "options": ["", "draft-mtp", "draft-eagle3", "draft-simple", "draft-dflash",
                  "draft-dspark", "ngram-simple", "ngram-map-k", "ngram-map-k4v",
                  "ngram-mod", "ngram-cache"],
@@ -116,33 +141,50 @@ FIELDS = [
      },
      "help": "投机解码：让『草稿』先批量猜多个 token，主模型一次验证整批，从而提速。"
              " 常见选 draft-mtp（用模型自带的 MTP 头，无需额外文件）。"
-             " 注意 MTP 会强制单槽（-np 1），且 LLM 类模型才有效；嵌入/小模型无需开。"},
+             " 注意 MTP 会强制单槽（-np 1），且 LLM 类模型才有效；嵌入/小模型无需开。",
+     "help_en": "Speculative decoding: a draft guesses several tokens ahead and the main model verifies the whole batch "
+             "at once, speeding up generation. draft-mtp is the common pick (uses the model's built-in MTP head, "
+             "no extra file). Note: MTP forces a single slot (-np 1); it only helps LLM-class models."},
 
     {"key": "spec_draft_model", "group": "加速", "kind": "path",
-     "label": "草稿模型 (--spec-draft-model)", "aliases": ["--spec-draft-model", "-md", "--model-draft"],
+     "label": "草稿模型 (--spec-draft-model)", "label_en": "Draft model (--spec-draft-model)",
+     "aliases": ["--spec-draft-model", "-md", "--model-draft"],
      "help": "投机解码用的『草稿模型』GGUF 文件路径。仅当 spec-type 选 draft-* 时需要："
              " 例如 draft-dflash 要填 DFlash2 草稿文件，draft-eagle3 要填 EAGLE3 草稿文件。"
-             " 填错或不填对应草稿文件，服务会启动失败。普通模式（none）留空即可。"},
+             " 填错或不填对应草稿文件，服务会启动失败。普通模式（none）留空即可。",
+     "help_en": "GGUF path of the draft model used for speculative decoding. Required for draft-* spec types only: "
+             "e.g. draft-dflash needs the DFlash2 draft file, draft-eagle3 needs the EAGLE3 draft file. "
+             "A wrong or missing draft file will stop the server from starting. Leave empty otherwise."},
 
     {"key": "spec_draft_n_max", "group": "加速", "kind": "slider",
-     "label": "草稿长度 (--spec-draft-n-max)", "aliases": ["--spec-draft-n-max"],
-     "min": 1, "max": 16, "step": 1, "unit": "tok", "default": 3,
+     "label": "草稿长度 (--spec-draft-n-max)", "label_en": "Draft length (--spec-draft-n-max)",
+     "aliases": ["--spec-draft-n-max"],
+     "min": 1, "max": 16, "step": 1, "unit": "tok", "unit_en": "tok", "default": 3,
      "help": "每次投机最多猜测的草稿 token 数。越大单次验证越多、提速潜力越高，但草稿质量下降可能反噬。"
-             " 默认 3 通常够用；draft-dflash 可试 4~8。仅 draft/ngram 模式生效。"},
+             " 默认 3 通常够用；draft-dflash 可试 4~8。仅 draft/ngram 模式生效。",
+     "help_en": "Maximum number of draft tokens guessed per speculation step. Larger values can verify more at once, "
+             "but poor drafts may backfire. Default 3 is usually fine; try 4-8 for draft-dflash. "
+             "Only applies to draft/ngram modes."},
 
     # ---- 上下文与显存 ----
     {"key": "ctx_size", "group": "上下文与显存", "kind": "slider",
-     "label": "上下文长度 (-ctx-size)", "aliases": ["--ctx-size", "-c"],
-     "min": 512, "max": 1048576, "step": 512, "unit": "token",
+     "label": "上下文长度 (-ctx-size)", "label_en": "Context length (-ctx-size)",
+     "aliases": ["--ctx-size", "-c"],
+     "min": 512, "max": 1048576, "step": 512, "unit": "token", "unit_en": "tokens",
      "default": 131072, "snap": [8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576],
      "quick": [32768, 65536, 131072, 262144, 524288, 1048576],
      "help": "上下文窗口大小，即可同时『记住』的最长对话长度（含历史）。"
              " 越大能处理的文档/对话越长，但占用显存越多、加载越慢。"
              " 常用档位：32K（轻量）/128K（本机 24G 稳妥）/256K（需配 KV 量化）/512K~1M（长文档，强烈建议 KV 量化）。"
-             " 点下方快捷按钮即可一键跳到档位。注：旧参数里 '-c' 是 '--ctx-size' 简写，冲突时本工具只保留一个。"},
+             " 点下方快捷按钮即可一键跳到档位。注：旧参数里 '-c' 是 '--ctx-size' 简写，冲突时本工具只保留一个。",
+     "help_en": "Context window size: the longest conversation (including history) the model can keep in memory at once. "
+             "Bigger handles longer documents but uses more VRAM and loads slower. "
+             "Common picks: 32K light / 128K safe on 24GB VRAM / 256K needs KV quantization / 512K-1M for long docs. "
+             "Use the quick buttons below to jump. Note: '-c' is an alias of '--ctx-size'; duplicates are deduplicated."},
 
     {"key": "ctk", "group": "上下文与显存", "kind": "combo",
-     "label": "KV cache 类型 K (-ctk)", "aliases": ["-ctk", "--cache-type-k"],
+     "label": "KV cache 类型 K (-ctk)", "label_en": "KV cache type K (-ctk)",
+     "aliases": ["-ctk", "--cache-type-k"],
      "options": ["", "f16", "f32", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"],
      "option_help": {
          "": "默认（f16，精度最高但最占显存）。",
@@ -157,10 +199,14 @@ FIELDS = [
          "q5_1": "5 位量化变体。",
      },
      "help": "KV cache 是『注意力记忆』的缓存。量化它能大幅省显存、支撑更长上下文，但精度略降。"
-             " 长上下文（≥64K）强烈建议 q4_0 / iq4_nl / q8_0。ctk/ctv 通常设为一致。"},
+             " 长上下文（≥64K）强烈建议 q4_0 / iq4_nl / q8_0。ctk/ctv 通常设为一致。",
+     "help_en": "KV cache stores attention memory. Quantizing it saves a lot of VRAM and enables longer contexts, "
+             "with a small precision loss. For contexts >= 64K, q4_0 / iq4_nl / q8_0 are recommended. "
+             "ctk and ctv are usually set the same."},
 
     {"key": "ctv", "group": "上下文与显存", "kind": "combo",
-     "label": "KV cache 类型 V (-ctv)", "aliases": ["-ctv", "--cache-type-v"],
+     "label": "KV cache 类型 V (-ctv)", "label_en": "KV cache type V (-ctv)",
+     "aliases": ["-ctv", "--cache-type-v"],
      "options": ["", "f16", "f32", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"],
      "option_help": {
          "": "默认（f16）。",
@@ -174,10 +220,12 @@ FIELDS = [
          "q5_0": "5 位量化。",
          "q5_1": "5 位量化变体。",
      },
-     "help": "KV cache 的 V（Value）部分类型。一般与 ctk 设成相同量化。见上方 ctk 说明。"},
+     "help": "KV cache 的 V（Value）部分类型。一般与 ctk 设成相同量化。见上方 ctk 说明。",
+     "help_en": "Type of the V (Value) part of the KV cache. Usually set the same as ctk. See ctk above."},
 
     {"key": "flash_attn", "group": "上下文与显存", "kind": "combo",
-     "label": "Flash Attention (-fa)", "aliases": ["-fa", "--flash-attn"],
+     "label": "Flash Attention (-fa)", "label_en": "Flash Attention (-fa)",
+     "aliases": ["-fa", "--flash-attn"],
      "options": ["auto", "on", "off"],
      "option_help": {
          "auto": "由 llama.cpp 自动判断是否启用（默认，最稳妥）。",
@@ -185,110 +233,179 @@ FIELDS = [
          "off": "关闭。极少数老卡或异常时回退用。",
      },
      "help": "Flash Attention 是一种更高效的注意力计算方式：更快、更省显存。"
-             " 现代显卡（如 RTX 40 系）建议 on；不确定就 auto。"},
+             " 现代显卡（如 RTX 40 系）建议 on；不确定就 auto。",
+     "help_en": "Flash Attention is a more efficient attention implementation: faster and lower VRAM. "
+             "Use 'on' on modern GPUs (e.g. RTX 40 series); 'auto' when unsure."},
 
     # ---- 并发与吞吐 ----
     {"key": "parallel", "group": "并发与吞吐", "kind": "slider",
-     "label": "并发槽数 (-np)", "aliases": ["-np", "--parallel"],
-     "min": 1, "max": 16, "step": 1, "unit": "槽",
+     "label": "并发槽数 (-np)", "label_en": "Parallel slots (-np)",
+     "aliases": ["-np", "--parallel"],
+     "min": 1, "max": 16, "step": 1, "unit": "槽", "unit_en": "slots",
      "default": 1,
      "help": "服务能同时处理的请求『槽位』数。1 = 单用户独占；调大可并发服务多人，但每个槽都占显存/上下文。"
-             " 开投机解码(MTP)时会被强制为 1。普通个人使用设 1~4。"},
+             " 开投机解码(MTP)时会被强制为 1。普通个人使用设 1~4。",
+     "help_en": "Number of request slots the server handles concurrently. 1 = single-user exclusive. "
+             "More slots serve multiple users but each consumes VRAM/context. "
+             "MTP speculative decoding forces this to 1. Use 1-4 for personal use."},
 
     {"key": "batch_size", "group": "并发与吞吐", "kind": "slider",
-     "label": "批大小 (-b)", "aliases": ["-b", "--batch-size"],
-     "min": 128, "max": 8192, "step": 128, "unit": "tok",
+     "label": "批大小 (-b)", "label_en": "Batch size (-b)",
+     "aliases": ["-b", "--batch-size"],
+     "min": 128, "max": 8192, "step": 128, "unit": "tok", "unit_en": "tok",
      "default": 2048,
      "help": "一次处理的最大逻辑 token 批量。影响吞吐（多人/长提示时）。调太大占显存。"
-             " 默认 2048 通常够用；若要更高并发可适度上调。"},
+             " 默认 2048 通常够用；若要更高并发可适度上调。",
+     "help_en": "Maximum logical token batch processed at once. Affects throughput with concurrent users or long prompts. "
+             "Too large costs VRAM. Default 2048 is usually enough; raise it for higher concurrency."},
 
     {"key": "ubatch_size", "group": "并发与吞吐", "kind": "slider",
-     "label": "物理批大小 (-ub)", "aliases": ["-ub", "--ubatch-size"],
-     "min": 64, "max": 2048, "step": 64, "unit": "tok",
+     "label": "物理批大小 (-ub)", "label_en": "Physical batch size (-ub)",
+     "aliases": ["-ub", "--ubatch-size"],
+     "min": 64, "max": 2048, "step": 64, "unit": "tok", "unit_en": "tok",
      "default": 512,
-     "help": "物理批大小，配合 batch-size 使用。一般保持为 batch 的约 1/4。默认 512 即可，调参会同时带动吞吐与显存。"},
+     "help": "物理批大小，配合 batch-size 使用。一般保持为 batch 的约 1/4。默认 512 即可，调参会同时带动吞吐与显存。",
+     "help_en": "Physical batch size, used together with batch-size. Usually about 1/4 of the batch size. "
+             "Default 512 is fine; changes affect both throughput and VRAM."},
 
     {"key": "threads", "group": "并发与吞吐", "kind": "slider",
-     "label": "CPU 线程 (-t)", "aliases": ["-t", "--threads"],
-     "min": 1, "max": max(CPU_THREADS, 8), "step": 1, "unit": "线程",
+     "label": "CPU 线程 (-t)", "label_en": "CPU threads (-t)",
+     "aliases": ["-t", "--threads"],
+     "min": 1, "max": max(CPU_THREADS, 8), "step": 1, "unit": "线程", "unit_en": "threads",
      "default": CPU_THREADS,
      "help": "生成时使用的 CPU 线程数。仅在部分计算落到 CPU 时影响速度（如 ngl 没拉满）。"
-             " 一般设为本机物理核心数；全 GPU 推理时影响不大。"},
+             " 一般设为本机物理核心数；全 GPU 推理时影响不大。",
+     "help_en": "Number of CPU threads used during generation. Only matters when some work stays on the CPU "
+             "(e.g. GPU layers not fully offloaded). Usually set to the physical core count; "
+             "little effect when fully GPU-accelerated."},
 
     # ---- 采样（生成质量）----
     {"key": "temperature", "group": "采样", "kind": "slider",
-     "label": "温度 (--temp)", "aliases": ["--temp", "--temperature"],
+     "label": "温度 (--temp)", "label_en": "Temperature (--temp)",
+     "aliases": ["--temp", "--temperature"],
      "min": 0, "max": 2, "step": 0.05, "unit": "",
      "default": 0.8,
      "help": "随机性。低（0.2）= 更确定、更死板；高（1.0+）= 更发散、更有创意但易跑题。"
-             " 日常对话 0.7~0.9；代码/事实问答可调低到 0.2~0.5；0 = 贪心（最确定）。"},
+             " 日常对话 0.7~0.9；代码/事实问答可调低到 0.2~0.5；0 = 贪心（最确定）。",
+     "help_en": "Sampling randomness. Low (0.2) = more deterministic and rigid; high (1.0+) = more creative but prone to drift. "
+             "Use 0.7-0.9 for chat, 0.2-0.5 for code/factual answers; 0 = greedy (most deterministic)."},
 
     {"key": "min_p", "group": "采样", "kind": "slider",
-     "label": "min-p (--min-p)", "aliases": ["--min-p"],
+     "label": "min-p (--min-p)", "label_en": "min-p (--min-p)",
+     "aliases": ["--min-p"],
      "min": 0, "max": 0.5, "step": 0.01, "unit": "",
      "default": 0.05,
      "help": "最低概率阈值：只从累计概率足够高的候选里采样，过滤垃圾 token。"
-             " 0.05 是 llama.cpp 默认；调高更『保守』，调 0 关闭。与 temperature 配合控制质量。"},
+             " 0.05 是 llama.cpp 默认；调高更『保守』，调 0 关闭。与 temperature 配合控制质量。",
+     "help_en": "Minimum probability threshold: samples only from candidates whose cumulative probability is high enough, "
+             "filtering bad tokens. 0.05 is the llama.cpp default; higher is more conservative; 0 disables it. "
+             "Works with temperature to control quality."},
 
     {"key": "top_k", "group": "采样", "kind": "slider",
-     "label": "top-k (--top-k)", "aliases": ["--top-k"],
+     "label": "top-k (--top-k)", "label_en": "top-k (--top-k)",
+     "aliases": ["--top-k"],
      "min": 0, "max": 100, "step": 1, "unit": "", "default": 40,
      "help": "只从概率最高的前 k 个候选里采样。k 越小输出越聚焦、越可预测；k 越大越发散。"
-             " 默认 40；设 0 = 关闭 top-k（只看 top-p）。与 top-p 叠加使用，共同限制候选集。"},
+             " 默认 40；设 0 = 关闭 top-k（只看 top-p）。与 top-p 叠加使用，共同限制候选集。",
+     "help_en": "Sample only from the top-k highest-probability candidates. Smaller k = more focused and predictable; "
+             "larger k = more diverse. Default 40; 0 disables top-k (top-p only). Combined with top-p."},
 
     {"key": "top_p", "group": "采样", "kind": "slider",
-     "label": "top-p (--top-p)", "aliases": ["--top-p"],
+     "label": "top-p (--top-p)", "label_en": "top-p (--top-p)",
+     "aliases": ["--top-p"],
      "min": 0, "max": 1, "step": 0.01, "unit": "", "default": 0.95,
      "help": "核采样：只从累计概率达 p 的最小候选集里采样。p 越小越保守（如 0.9 只取覆盖 90% 概率的词），"
-             " p=1.0 = 关闭。默认 0.95。与 top-k 配合：先按 top-k 截前 k 个，再在其中按 top-p 截概率。"},
+             " p=1.0 = 关闭。默认 0.95。与 top-k 配合：先按 top-k 截前 k 个，再在其中按 top-p 截概率。",
+     "help_en": "Nucleus sampling: sample only from the smallest candidate set covering cumulative probability p. "
+             "Smaller p = more conservative; p=1.0 disables it. Default 0.95. With top-k, candidates are first "
+             "cut to k, then by top-p."},
 
     {"key": "seed", "group": "采样", "kind": "text",
-     "label": "随机种子 (-s)", "aliases": ["-s", "--seed"],
-     "help": "随机种子。固定一个整数可让生成『可复现』（同样输入同样输出）。-1 = 每次随机。调试/评测时设固定值，日常留空或 -1。"},
+     "label": "随机种子 (-s)", "label_en": "Random seed (-s)",
+     "aliases": ["-s", "--seed"],
+     "help": "随机种子。固定一个整数可让生成『可复现』（同样输入同样输出）。-1 = 每次随机。调试/评测时设固定值，日常留空或 -1。",
+     "help_en": "Random seed. A fixed integer makes generation reproducible (same input, same output). "
+             "-1 = random every time. Set a fixed value for debugging/evaluation, otherwise leave empty or -1."},
 
     {"key": "jinja", "group": "采样", "kind": "check",
-     "label": "Jinja 模板 (--jinja)", "aliases": ["--jinja"],
+     "label": "Jinja 模板 (--jinja)", "label_en": "Jinja template (--jinja)",
+     "aliases": ["--jinja"],
      "help": "启用服务端 Jinja 聊天模板渲染。参考配置（Qwen 官方示例）均带 --jinja，"
-             " 能正确套用模型的对话/思考模板。本服务也应勾上，否则可能用错模板导致格式异常。"},
+             " 能正确套用模型的对话/思考模板。本服务也应勾上，否则可能用错模板导致格式异常。",
+     "help_en": "Enable server-side Jinja chat template rendering. Official Qwen examples include --jinja to apply "
+             "the model's chat/thinking template correctly. Keep it enabled, otherwise the wrong template "
+             "may cause formatting issues."},
 
     {"key": "chat_template_kwargs", "group": "采样", "kind": "text",
-     "label": "模板参数 (--chat-template-kwargs)", "aliases": ["--chat-template-kwargs"],
+     "label": "模板参数 (--chat-template-kwargs)", "label_en": "Template args (--chat-template-kwargs)",
+     "aliases": ["--chat-template-kwargs"],
      "help": "传给聊天模板的 JSON 参数，控制推理行为。Qwen3.8 常用："
              " 关思考 '{\"enable_thinking\":false}'；调推理强度 '{\"reasoning_effort\":\"low|medium|xhigh\"}'"
-             "（默认 xhigh，无 high/max）。需写合法 JSON，含花括号与引号。留空=默认。"},
+             "（默认 xhigh，无 high/max）。需写合法 JSON，含花括号与引号。留空=默认。",
+     "help_en": "JSON arguments passed to the chat template to control inference. Common for Qwen3.8: "
+             "'{\"enable_thinking\":false}' disables thinking; '{\"reasoning_effort\":\"low|medium|xhigh\"}' "
+             "sets reasoning effort (default xhigh; no high/max). Must be valid JSON. Empty = defaults."},
 
     # ---- 网络 ----
     {"key": "host", "group": "网络", "kind": "combo",
-     "label": "监听地址 (--host)", "aliases": ["--host"],
+     "label": "监听地址 (--host)", "label_en": "Listen address (--host)",
+     "aliases": ["--host"],
      "options": ["127.0.0.1", "0.0.0.0", "localhost"],
      "option_help": {
          "127.0.0.1": "仅本机可访问（最安全，推荐个人使用）。",
          "0.0.0.0": "监听所有网卡，局域网/外网其他机器也能连（注意安全风险，需配 api-key）。",
          "localhost": "等价本机回环。",
      },
-     "help": "服务监听哪个网络地址。个人单机用 127.0.0.1 最安全；要让手机/其他电脑访问才用 0.0.0.0（务必同时设 api-key）。"},
+     "help": "服务监听哪个网络地址。个人单机用 127.0.0.1 最安全；要让手机/其他电脑访问才用 0.0.0.0（务必同时设 api-key）。",
+     "help_en": "Which network address the server listens on. 127.0.0.1 (localhost only) is safest for a single machine; "
+             "use 0.0.0.0 only to allow other devices on the LAN (always set an api-key too)."},
 
     {"key": "port", "group": "网络", "kind": "text",
-     "label": "端口 (--port)", "aliases": ["--port"],
-     "help": "服务监听的端口。默认 8080。若被占用就改一个（如 8081）。客户端连 http://地址:端口/v1 。"},
+     "label": "端口 (--port)", "label_en": "Port (--port)",
+     "aliases": ["--port"],
+     "help": "服务监听的端口。默认 8080。若被占用就改一个（如 8081）。客户端连 http://地址:端口/v1 。",
+     "help_en": "Port the server listens on. Default 8080; change it (e.g. 8081) if occupied. "
+             "Clients connect to http://address:port/v1."},
 
     # ---- 高级开关 ----
     {"key": "no_mmap", "group": "高级", "kind": "check",
-     "label": "禁用 mmap (--no-mmap)", "aliases": ["--no-mmap"],
-     "help": "关闭内存映射加载。默认用 mmap 加载更快更省内存；某些特殊环境才需要关掉（会变慢）。一般保持关闭此选项。"},
+     "label": "禁用 mmap (--no-mmap)", "label_en": "Disable mmap (--no-mmap)",
+     "aliases": ["--no-mmap"],
+     "help": "关闭内存映射加载。默认用 mmap 加载更快更省内存；某些特殊环境才需要关掉（会变慢）。一般保持关闭此选项。",
+     "help_en": "Disable memory-mapped loading. mmap is faster and uses less memory; only disable in special "
+             "environments (it will be slower). Normally leave this unchecked."},
 
     {"key": "mlock", "group": "高级", "kind": "check",
-     "label": "锁定内存 (--mlock)", "aliases": ["--mlock"],
-     "help": "强制把模型锁在物理内存，避免被系统换页到磁盘导致卡顿。仅在内存充足时有意义；本机显存/GPU 推理一般无需开。"},
+     "label": "锁定内存 (--mlock)", "label_en": "Lock memory (--mlock)",
+     "aliases": ["--mlock"],
+     "help": "强制把模型锁在物理内存，避免被系统换页到磁盘导致卡顿。仅在内存充足时有意义；本机显存/GPU 推理一般无需开。",
+     "help_en": "Pin the model in physical memory to avoid paging to disk. Only useful with plenty of RAM; "
+             "usually unnecessary for GPU inference on this machine."},
 
     {"key": "no_kv_offload", "group": "高级", "kind": "check",
-     "label": "禁用 KV 卸载 (--no-kv-offload)", "aliases": ["--no-kv-offload"],
-     "help": "不让 KV cache 卸载到 GPU（强制留 CPU）。仅在你明确想压低显存、牺牲速度时启用。常规使用保持关闭。"},
+     "label": "禁用 KV 卸载 (--no-kv-offload)", "label_en": "Disable KV offload (--no-kv-offload)",
+     "aliases": ["--no-kv-offload"],
+     "help": "不让 KV cache 卸载到 GPU（强制留 CPU）。仅在你明确想压低显存、牺牲速度时启用。常规使用保持关闭。",
+     "help_en": "Keep the KV cache on the CPU instead of offloading it to the GPU. Enable only if you deliberately "
+             "want lower VRAM usage at the cost of speed. Normally leave unchecked."},
 
     {"key": "cpu_moe", "group": "高级", "kind": "check",
-     "label": "MoE 走 CPU (--cpu-moe)", "aliases": ["--cpu-moe"],
-     "help": "MoE（混合专家）模型把专家权重留在 CPU。仅 MoE 架构模型（如 Qwen-MoE、DeepSeek-MoE）相关；非 MoE 模型忽略。显存不够时可用，但会慢。"},
+     "label": "MoE 走 CPU (--cpu-moe)", "label_en": "MoE on CPU (--cpu-moe)",
+     "aliases": ["--cpu-moe"],
+     "help": "MoE（混合专家）模型把专家权重留在 CPU。仅 MoE 架构模型（如 Qwen-MoE、DeepSeek-MoE）相关；非 MoE 模型忽略。显存不够时可用，但会慢。",
+     "help_en": "Keep MoE (mixture-of-experts) expert weights on the CPU. Only relevant for MoE models "
+             "(e.g. Qwen-MoE, DeepSeek-MoE); ignored for non-MoE models. Useful when VRAM is tight, but slower."},
 ]
+# 参数分组名 i18n（组头按钮显示；FIELDS 内部仍用中文 key 保证兼容）
+GROUP_NAMES = {
+    "模型与视觉": "Model & Vision",
+    "加速": "Acceleration",
+    "上下文与显存": "Context & VRAM",
+    "并发与吞吐": "Concurrency",
+    "采样": "Sampling",
+    "网络": "Network",
+    "高级": "Advanced",
+}
 ALIAS_TO_KEY = {}
 for _f in FIELDS:
     for _a in _f["aliases"]:
@@ -654,10 +771,21 @@ class ControlGUI(ctk.CTk):
         # 表单编辑/载入/写回时失效
         self._dirty_cache = None
         self._dirty_at = 0.0
+        # ---- 官方更新状态（B 方案：ggml-org/llama.cpp）----
+        self._upd_release = None      # 最近一次检查到的最新 release 信息
+        self._upd_installing = False  # 官方更新安装进行中（关窗守护）
+        self._close_after_restart = False  # 用户确认退出后，等重启收尾再关窗
+        self._upd_checking = False    # 防重入
+        self._upd_worker = None       # 后台检查线程
+        self._upd_modal_open = False  # 更新日志弹窗互斥（startup 提示与手动检查）
+        self._upd_startup_after = None
 
         self._build_widgets()
         self.refresh_all()
         self._start_polling()
+        # 启动后 1.2s 后台检查官方更新（仅提示，绝不自动安装）
+        if self.settings.get("upd_check_on_startup", True):
+            self._upd_startup_after = self.after(1200, self._check_updates_startup)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         # 缩放/拖拽防抖：WM_CONFIGURE 高频触发期间挂起 UI 应用与日志渲染，
         # 停止 300ms 后恢复（缩放卡顿修复）。
@@ -889,31 +1017,8 @@ class ControlGUI(ctk.CTk):
         if title:
             ctk.CTkLabel(inner, text=title, font=F_GROUP, text_color=C_MUT,
                          anchor="w").pack(fill="x", pady=(0, 8))
-        # 卡片 hover 抬升（D4，动效 2）：边框从 C_BORDER 插到浅蓝再插回，120ms
-        hover_border = "#cfe6ff" if ctk.get_appearance_mode() == "Light" else "#0a84ff"
-
-        def _tick(p):
-            t = ease_out_cubic(p, 1)
-            fr.configure(border_color=format_hex(lerp(C_BORDER, hover_border, t)))
-
-        def _enter(_):
-            if self._motion_on():
-                self.anim.animate(_tick, 120)  # -1 降级即同步终态
-            else:
-                fr.configure(border_color=hover_border)  # 动效关：瞬切
-
-        def _leave(_):
-            if self._motion_on():
-                def _back(p):
-                    t = ease_out_cubic(p, 1)
-                    fr.configure(border_color=format_hex(lerp(hover_border, C_BORDER, t)))
-
-                self.anim.animate(_back, 120)  # -1 降级即同步终态
-            else:
-                fr.configure(border_color=C_BORDER)
-
-        fr.bind("<Enter>", _enter)
-        fr.bind("<Leave>", _leave)
+        # 卡片边框保持 C_BORDER 恒定：已移除 hover 亮边动效（鼠标靠近卡片边缘时
+        # <Enter>/<Leave> 高频切换造成边框闪烁），视觉安静无闪烁。
         return inner
 
     # ---- 布局 ----
@@ -947,27 +1052,27 @@ class ControlGUI(ctk.CTk):
         self.lbl_state.pack(side="left")
         # P1-3：状态卡完整服务名（长 NSSM 服务名在下拉里仍可能被截，此处全文可见）
         self.lbl_svc = ctk.CTkLabel(row, text=self.service, font=F_SMALL, text_color=C_MUT)
-        self.lbl_svc.pack(side="left", padx=(12, 0))
+        self.lbl_svc.pack(side="left", padx=(10, 0))
         self.lbl_health = ctk.CTkLabel(row, text=t("health.idle"), font=F_BODY, text_color=C_MUT)
-        self.lbl_health.pack(side="left", padx=(18, 0))
-        ctk.CTkLabel(row, text=t("boot.label"), font=F_SMALL, text_color=C_MUT
-                     ).pack(side="left", padx=(24, 6))
+        self.lbl_health.pack(side="left", padx=(12, 0))
+        # 自启下拉即状态（菜单值 Auto (boot)/Manual/Disabled 自解释，不再配前缀标签，
+        # 为英文界面单行留足宽度）
         self.auto_var = tk.StringVar(value=t("boot.manual"))
         self.opt_auto = ctk.CTkOptionMenu(row, variable=self.auto_var,
                                           values=[t("boot.auto"), t("boot.manual"), t("boot.disabled")],
-                                          width=130, height=30, font=F_BODY,
+                                          width=110, height=30, font=F_BODY,
                                           fg_color=C_FIELD, button_color=C_BORDER,
                                           button_hover_color=C_ACC, text_color=C_TXT,
                                           command=lambda v: self.apply_auto())
-        self.opt_auto.pack(side="left")
+        self.opt_auto.pack(side="left", padx=(12, 0))
         act = ctk.CTkFrame(row, fg_color="transparent")
         act.pack(side="right")
         self.btn_start = self._btn(act, t("btn.start"), lambda: self.do_action("start"))
-        self.btn_start.pack(side="left", padx=3)
+        self.btn_start.pack(side="left", padx=2)
         self.btn_stop = self._btn(act, t("btn.stop"), lambda: self.do_action("stop"), kind="danger")
-        self.btn_stop.pack(side="left", padx=3)
-        self._btn(act, t("btn.restart"), self.do_restart).pack(side="left", padx=3)
-        self._btn(act, t("btn.settings"), self.open_settings).pack(side="left", padx=(18, 3))
+        self.btn_stop.pack(side="left", padx=2)
+        self._btn(act, t("btn.restart"), self.do_restart).pack(side="left", padx=2)
+        self._btn(act, t("btn.settings"), self.open_settings).pack(side="left", padx=(6, 2))
 
         # 预设区（单行：标题 + 可编辑下拉 + 删除图标；右侧 应用更改/还原）
         pr = self._card(self)
@@ -1092,9 +1197,10 @@ class ControlGUI(ctk.CTk):
         self.lbl_warn.pack(fill="x", padx=16, pady=(2, 8))
 
     def _group_label(self, group):
-        """组头文案：组名 + 展开指示（▾ 展开 / ▸ 收起）。"""
+        """组头文案：本地化组名 + 展开指示（▾ 展开 / ▸ 收起）。"""
+        label = GROUP_NAMES.get(group, group) if strings._current == "en" else group
         indicator = chr(0x25BE) if self.group_open.get(group, False) else chr(0x25B8)
-        return f"{group} {indicator}"
+        return f"{label} {indicator}"
 
     def _toggle_group(self, group):
         """点击组头切换展开/收起（D8）。瞬时切换优先正确性；状态写入
@@ -1108,6 +1214,12 @@ class ControlGUI(ctk.CTk):
             body.grid()
         else:
             body.grid_remove()
+
+    def _field_label(self, fld):
+        """字段 label 本地化（英文界面取 label_en，缺省回退中文 label）。"""
+        if strings._current == "en":
+            return fld.get("label_en") or fld["label"]
+        return fld["label"]
 
     def _build_field(self, parent, fld, row):
         key = fld["key"]
@@ -1126,7 +1238,7 @@ class ControlGUI(ctk.CTk):
             iv = tk.DoubleVar()
             self.var[key] = iv
             self._hook_trace(key, iv)
-            ctk.CTkLabel(parent, text=fld["label"], font=F_BODY, text_color=C_TXT,
+            ctk.CTkLabel(parent, text=self._field_label(fld), font=F_BODY, text_color=C_TXT,
                          anchor="w").grid(row=row, column=1, sticky="w", padx=2)
             n_steps = max(int(round((fld["max"] - fld["min"]) / fld["step"])), 1)
             w = ctk.CTkSlider(parent, variable=iv, from_=fld["min"], to=fld["max"],
@@ -1158,7 +1270,7 @@ class ControlGUI(ctk.CTk):
             return row + 1
 
         if fld["kind"] == "combo":
-            ctk.CTkLabel(parent, text=fld["label"], font=F_BODY, text_color=C_TXT,
+            ctk.CTkLabel(parent, text=self._field_label(fld), font=F_BODY, text_color=C_TXT,
                          anchor="w").grid(row=row, column=1, sticky="w", padx=2)
             cv = tk.StringVar()
             self.var[key] = cv
@@ -1176,7 +1288,7 @@ class ControlGUI(ctk.CTk):
             return row + 1
 
         if fld["kind"] == "check":
-            w = ctk.CTkCheckBox(parent, text=fld["label"], variable=v,
+            w = ctk.CTkCheckBox(parent, text=self._field_label(fld), variable=v,
                                 onvalue="1", offvalue="", font=F_BODY,
                                 text_color=C_TXT, fg_color=C_ACC,
                                 hover_color=C_ACCH, border_color=C_BORDER,
@@ -1186,7 +1298,7 @@ class ControlGUI(ctk.CTk):
             return row + 1
 
         if fld["kind"] == "path":
-            ctk.CTkLabel(parent, text=fld["label"], font=F_BODY, text_color=C_TXT,
+            ctk.CTkLabel(parent, text=self._field_label(fld), font=F_BODY, text_color=C_TXT,
                          anchor="w").grid(row=row, column=1, sticky="w", padx=2)
             # P1-2：Entry 保留 width=430（CTkEntry 透传 xview/xview_scroll，原生
             # ←→ 键滚动可用）；超长路径完整内容由「浏览」按钮 hover 提示展示。
@@ -1201,7 +1313,7 @@ class ControlGUI(ctk.CTk):
             return row + 1
 
         # text
-        ctk.CTkLabel(parent, text=fld["label"], font=F_BODY, text_color=C_TXT,
+        ctk.CTkLabel(parent, text=self._field_label(fld), font=F_BODY, text_color=C_TXT,
                      anchor="w").grid(row=row, column=1, sticky="w", padx=2)
         w = ctk.CTkEntry(parent, textvariable=v, width=430, font=F_BODY,
                          fg_color=C_FIELD, border_color=C_BORDER)
@@ -1270,6 +1382,12 @@ class ControlGUI(ctk.CTk):
             except Exception:  # noqa: BLE001
                 pass
 
+    def _unit(self, fld):
+        """滑块数值单位本地化（英文界面取 unit_en，缺省回退中文单位）。"""
+        if strings._current == "en":
+            return fld.get("unit_en") or fld.get("unit", "")
+        return fld.get("unit", "")
+
     def _fmt_ctx(self, num):
         if num >= 1048576:
             return f"{num // 1048576}M"
@@ -1286,7 +1404,7 @@ class ControlGUI(ctk.CTk):
         finally:
             self._suppress_trace = False
         self.widgets[key].set(float(val))
-        self.val_labels[key].configure(text=f"{val:g} {fld.get('unit', '')}".strip())
+        self.val_labels[key].configure(text=f"{val:g} {self._unit(fld)}".strip())
         self._flash_field(key)
 
     def _on_slide(self, key, val):
@@ -1302,7 +1420,7 @@ class ControlGUI(ctk.CTk):
                     finally:
                         self._suppress_trace = False
                     break
-        unit = fld.get("unit", "")
+        unit = self._unit(fld)
         self.val_labels[key].configure(text=f"{num:g} {unit}".strip())
 
     def _update_combo_hint(self, key):
@@ -1310,7 +1428,8 @@ class ControlGUI(ctk.CTk):
         shown = self.var[key].get()
         real = self._combo_map.get(key, {}).get(shown, shown)
         hint = fld.get("option_help", {}).get(real, "")
-        self.lbl_hint.configure(text=f"[{fld['label']}] {hint}" if hint else "")
+        label = fld.get("label_" + strings._current) or fld["label"]
+        self.lbl_hint.configure(text=f"[{label}] {hint}" if hint else "")
         if real != shown:
             self._suppress_trace = True  # 显示名归一化（（空）→""）不触发高亮
             try:
@@ -1320,12 +1439,16 @@ class ControlGUI(ctk.CTk):
 
     def _help_text(self, key):
         fld = next(f for f in FIELDS if f["key"] == key)
-        body = fld.get("help", "（无说明）")
+        en = strings._current == "en"
+        body = fld.get("help_" + strings._current) or fld.get("help", "（无说明）")
         if fld.get("option_help"):
-            body += "\n\n选项说明：\n" + "\n".join(
+            body += ("\n\nOptions:\n" if en else "\n\n选项说明：\n") + "\n".join(
                 f"  - {k or '（空）'}: {v}" for k, v in fld["option_help"].items())
         if fld["kind"] == "slider":
-            body += f"\n\n范围：{fld['min']} ~ {fld['max']}（步长 {fld['step']}），默认 {fld.get('default')}"
+            if en:
+                body += f"\n\nRange: {fld['min']} to {fld['max']} (step {fld['step']}), default {fld.get('default')}"
+            else:
+                body += f"\n\n范围：{fld['min']} ~ {fld['max']}（步长 {fld['step']}），默认 {fld.get('default')}"
         return body
 
     def _browse(self, key):
@@ -1496,7 +1619,7 @@ class ControlGUI(ctk.CTk):
                     except (ValueError, TypeError):
                         num = float(fld.get("default", fld["min"]))
                     self.var[key].set(num)
-                    self.val_labels[key].configure(text=f"{num:g} {fld.get('unit','')}".strip())
+                    self.val_labels[key].configure(text=f"{num:g} {self._unit(fld)}".strip())
                 else:
                     self.var[key].set(val)
         finally:
@@ -1707,37 +1830,40 @@ class ControlGUI(ctk.CTk):
 
     def _restart_worker(self, service, host, port):
         """后台重启序列：只允许 _log_q.put 与子进程调用，禁止碰控件 / self.after。"""
-        # 停止前健康检查（只提示，不阻断——重启本身就是修复手段）
-        if not check_health(host, port)[0]:
-            self._log_q.put(t("log.restart.unhealthy"))
-        self._log_q.put(fmt("log.restart.stop", s=service))
-        ok, msg = sc_action("stop", service)
-        if not ok:
-            self._log_q.put(fmt("log.restart.stopfail", m=msg))
-            self._log_q.put("__RESTART_DONE__")
-            return
-        stopped = False
-        for _ in range(40):
-            if sc_query_state(service) == "STOPPED":
-                stopped = True
-                break
-            time.sleep(0.5)
-        if not stopped:
-            self._log_q.put(t("log.restart.stoptimeout"))
-            self._log_q.put("__RESTART_DONE__")
-            return
-        self._log_q.put("__REFRESH_STATUS__")
-        self._log_q.put(t("log.restart.start"))
-        sc_action("start", service)
-        for _ in range(120):
-            if sc_query_state(service) == "RUNNING":
-                ok, d = check_health(host, port)
-                if ok:
-                    self._log_q.put(fmt("log.restart.ready", d=d))
+        try:
+            # 停止前健康检查（只提示，不阻断——重启本身就是修复手段）
+            if not check_health(host, port)[0]:
+                self._log_q.put(t("log.restart.unhealthy"))
+            self._log_q.put(fmt("log.restart.stop", s=service))
+            ok, msg = sc_action("stop", service)
+            if not ok:
+                self._log_q.put(fmt("log.restart.stopfail", m=msg))
+                return
+            stopped = False
+            for _ in range(40):
+                if sc_query_state(service) == "STOPPED":
+                    stopped = True
                     break
-            time.sleep(0.5)
-        self._log_q.put("__REFRESH_STATUS__")
-        self._log_q.put("__RESTART_DONE__")
+                time.sleep(0.5)
+            if not stopped:
+                self._log_q.put(t("log.restart.stoptimeout"))
+                return
+            self._log_q.put("__REFRESH_STATUS__")
+            self._log_q.put(t("log.restart.start"))
+            sc_action("start", service)
+            for _ in range(120):
+                if sc_query_state(service) == "RUNNING":
+                    ok, d = check_health(host, port)
+                    if ok:
+                        self._log_q.put(fmt("log.restart.ready", d=d))
+                        break
+                time.sleep(0.5)
+            self._log_q.put("__REFRESH_STATUS__")
+        finally:
+            # 无论成败都发收尾哨兵：_drain_log 复位 _restarting，
+            # 等待中的 _on_close 也能据此自动销毁窗口
+            self._log_q.put("__RESTART_DONE__")
+
 
     def apply_auto(self):
         """下拉即选即应用（先确认；无成功弹窗，失败才提示）。"""
@@ -1817,7 +1943,9 @@ class ControlGUI(ctk.CTk):
 
     def _drain_log(self):
         """主线程消费日志队列：普通消息打印，哨兵驱动状态复位/刷新。"""
-        if self._stop_poll:
+        # 等待重启收尾（_on_close 已确认退出）期间必须继续消费队列，
+        # __RESTART_DONE__ 到达后由消费分支销毁窗口；正常退出才停链。
+        if self._stop_poll and not getattr(self, "_close_after_restart", False):
             return
         while True:
             try:
@@ -1826,11 +1954,30 @@ class ControlGUI(ctk.CTk):
                 break
             if text == "__RESTART_DONE__":
                 self._restarting = False
+                if getattr(self, "_close_after_restart", False):
+                    try:
+                        self.destroy()
+                    except Exception:  # noqa: BLE001 - 已销毁则忽略
+                        pass
+                    return  # 窗口已销毁，不再碰控件/续调 after
+            elif text == "__UPD_DONE__":
+                # 安装线程收尾哨兵：复位 _upd_installing，让关窗守护放行
+                self._upd_installing = False
             elif text == "__REFRESH_STATUS__":
                 self.refresh_status()
+            elif isinstance(text, tuple) and text and text[0] == "__UPD_CHECK_DONE__":
+                self._check_updates_done(text[1], text[2], text[3], text[4])
+            elif isinstance(text, tuple) and text and text[0] == "__UPD_INSTALL_ERR__":
+                messagebox.showerror(t("upd.err.title"),
+                                     fmt("upd.err", e=text[1]), parent=self)
             else:
                 self._log_line(text)
-        self.after(120, self._drain_log)
+        # 正常退出（非等待重启）时链已在上方停住；等待重启时 120ms 一轮
+        try:
+            self.after(120, self._drain_log)
+        except Exception:  # noqa: BLE001 - 窗口已销毁时链自然结束
+            pass
+
 
     def _start_polling(self):
         self._drain_log()
@@ -2070,7 +2217,7 @@ class ControlGUI(ctk.CTk):
                         self.lbl_svc.configure(text=cur_svc)
                 if state == "RUNNING":
                     self.lbl_health.configure(
-                        text=(fmt("status.health.ok", d=detail[:40]) if ok else fmt("status.health.bad", d=detail[:40])),
+                        text=(fmt("status.health.ok", d=detail[:26]) if ok else fmt("status.health.bad", d=detail[:26])),
                         text_color=C_RUN if ok else C_RED)
                     self._update_status_dot(state, ok)
                 else:
@@ -2087,7 +2234,26 @@ class ControlGUI(ctk.CTk):
         self.after(400, self._drain_status)
 
     def _on_close(self):
+        # 关窗守护（短期清单第 1 条）：重启或更新进行中不得静默退出。
+        # 用户确认后：
+        # - 安装中：窗口立即销毁，安装线程为非 daemon，主进程会等它把
+        #   当前文件替换/回滚步骤跑完，不会留下半更新状态的二进制；
+        # - 重启中：窗口保留，_drain_log 持续消费哨兵，重启收尾后自动销毁。
+        busy = getattr(self, "_restarting", False) or getattr(self, "_upd_installing", False)
+        if busy:
+            if not messagebox.askyesno(
+                    t("mb.busy"), t("msg.close.busy"), parent=self):
+                return
+            if not getattr(self, "_upd_installing", False):
+                # 等重启完成：保留 drain 链消费 __RESTART_DONE__ 后自动关窗
+                self._close_after_restart = True
         self._stop_poll = True
+        if self._upd_startup_after is not None:
+            try:
+                self.after_cancel(self._upd_startup_after)
+            except Exception:  # noqa: BLE001
+                pass
+            self._upd_startup_after = None
         self.anim.cancel_all()  # 停掉全部在途动画，帧回调发现不在注册表即自停
         # 取消全部按钮渐隐 after 帧（F1：无泄漏 after；按钮销毁后回调自吞 TclError）
         for tok in list(self._hover_fades.values()):
@@ -2109,7 +2275,11 @@ class ControlGUI(ctk.CTk):
             save_settings(self.settings)
         except Exception:  # noqa: BLE001 - 设置保存失败不阻断退出
             pass
+        # 等待重启收尾：保留窗口，_drain_log 在 __RESTART_DONE__ 后自动销毁
+        if getattr(self, "_close_after_restart", False):
+            return
         self.destroy()
+
 
     def _motion_on(self):
         """动效总开关（design-guide §五）：关闭后 D3-D7 所有动画直跳终态。"""
@@ -2119,7 +2289,7 @@ class ControlGUI(ctk.CTk):
     def open_settings(self):
         win = ctk.CTkToplevel(self)
         win.title(t("settings.title"))
-        win.geometry("500x320")  # P2：加宽设置窗，容纳英文长文案
+        win.geometry("560x600")  # 含官方更新区：加宽加高
         win.transient(self)
         win.grab_set()
         self._settings_win = win
@@ -2153,8 +2323,46 @@ class ControlGUI(ctk.CTk):
             command=self._change_motion)
         motion_cb.pack(anchor="w", padx=20, pady=(16, 4))
 
+        # ---- 官方更新区 ----
+        sep = ctk.CTkFrame(win, height=1, fg_color=C_BORDER, corner_radius=0)
+        sep.pack(fill="x", padx=20, pady=(16, 8))
+
+        ctk.CTkLabel(win, text=t("upd.section"), font=F_GROUP, text_color=C_TXT,
+                     anchor="w").pack(fill="x", padx=20)
+
+        # 二进制变体（内部存 channel 键，下拉展示友好名）
+        ctk.CTkLabel(win, text=t("upd.channel"), font=F_BODY, text_color=C_MUT,
+                     anchor="w").pack(fill="x", padx=20, pady=(10, 4))
+        self._upd_channel_var = tk.StringVar(
+            value=self.settings.get("upd_channel", updater.DEFAULT_CHANNEL))
+        _ch_names = {ch: updater.CHANNELS.get(ch, ch) for ch in updater.CHANNEL_ORDER}
+        ctk.CTkOptionMenu(
+            win, values=list(_ch_names.values()), width=220, font=F_BODY,
+            command=lambda shown: self._change_upd_channel(
+                {v: k for k, v in _ch_names.items()}.get(shown, shown))
+        ).pack(anchor="w", padx=20)
+        self._upd_channel_var.set(self.settings.get("upd_channel", updater.DEFAULT_CHANNEL))
+
+        # 启动自动检查开关
+        self._upd_auto_var = tk.BooleanVar(
+            value=bool(self.settings.get("upd_check_on_startup", True)))
+        ctk.CTkCheckBox(
+            win, text=t("upd.auto.label"), variable=self._upd_auto_var,
+            font=F_BODY, text_color=C_TXT, fg_color=C_ACC,
+            hover_color=C_ACCH, border_color=C_BORDER, corner_radius=6,
+            command=self._change_upd_auto).pack(anchor="w", padx=20, pady=(14, 4))
+
+        # 版本状态 + 立即检查
+        self._upd_status_lbl = ctk.CTkLabel(
+            win, text="", font=F_SMALL, text_color=C_MUT, anchor="w",
+            justify="left", wraplength=480)
+        self._upd_status_lbl.pack(fill="x", padx=20, pady=(8, 4))
+        self._upd_check_btn = self._btn(win, t("upd.check"), self._check_updates_manual)
+        self._upd_check_btn.pack(anchor="w", padx=20)
+        self._refresh_upd_status_label()
+
         ctk.CTkLabel(win, text=t("settings.note"), font=F_SMALL, text_color=C_MUT,
-                     wraplength=360, justify="left").pack(fill="x", padx=20, pady=(16, 0))
+                     wraplength=480, justify="left").pack(fill="x", padx=20, pady=(14, 0))
         self._btn(win, t("settings.close"), win.destroy).pack(pady=(14, 12))
 
     def _change_language(self, shown, win=None):
@@ -2175,11 +2383,392 @@ class ControlGUI(ctk.CTk):
         self.settings["motion_enabled"] = bool(self._motion_var.get())
         save_settings(self.settings)
 
+    # ---- 官方更新（llama.cpp） ----
+    def _upd_channel(self):
+        """当前选择的官方二进制变体（优先设置值，非法回退默认）。"""
+        ch = self.settings.get("upd_channel", updater.DEFAULT_CHANNEL)
+        return ch if ch in updater.CHANNELS else updater.DEFAULT_CHANNEL
+
+    def _upd_target_dir(self):
+        """替换目标：优先按当前服务 NSSM AppDirectory 推导，失败回退 LLAMA_DIR。"""
+        try:
+            d = app_directory(self.service)
+            if d and os.path.isdir(d):
+                return d
+        except Exception:  # noqa: BLE001
+            pass
+        return LLAMA_DIR
+
+    def _upd_server_exe(self):
+        return os.path.join(self._upd_target_dir(), "llama-server.exe")
+
+    def _change_upd_channel(self, channel):
+        """切换二进制变体：写盘并清掉旧检查结果（状态标签跟随语言实时刷新）。"""
+        if channel not in updater.CHANNELS:
+            channel = updater.DEFAULT_CHANNEL
+        self.settings["upd_channel"] = channel
+        save_settings(self.settings)
+        self._upd_release = None
+        self._refresh_upd_status_label()
+
+    def _change_upd_auto(self):
+        self.settings["upd_check_on_startup"] = bool(self._upd_auto_var.get())
+        save_settings(self.settings)
+
+    def _installed_build(self):
+        """本地 build 号（查 llama-server.exe --version；异常返回 None）。"""
+        try:
+            return updater.get_installed_build(self._upd_server_exe())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _refresh_upd_status_label(self, status=None):
+        """更新设置页状态行；status 优先（'checking' / ('done', tag) / ('fail', msg)）。"""
+        lbl = getattr(self, "_upd_status_lbl", None)
+        if lbl is None or not lbl.winfo_exists():
+            return
+        if status == "checking":
+            text = t("upd.checking")
+        elif isinstance(status, tuple) and status and status[0] == "done":
+            text = fmt("upd.check.done", t=status[1])
+        elif isinstance(status, tuple) and status and status[0] == "fail":
+            text = fmt("upd.check.fail", e=status[1])
+        else:
+            b = self._installed_build()
+            if b is not None:
+                text = fmt("upd.status.now", b="b%d" % b)
+            else:
+                text = t("upd.status.unknown")
+        lbl.configure(text=text)
+
+    def _upd_assets_names(self):
+        return [a.get("name") or "?" for a in (self._upd_release or {}).get("assets", [])]
+
+    def _check_updates_startup(self):
+        """启动自动检查：后台跑，有新版本时弹「更新日志」窗口（仅提示）。"""
+        self._upd_startup_after = None
+        self._check_updates_worker(interactive=False)
+
+    def _check_updates_manual(self):
+        """设置页「立即检查」：后台跑，完成后强制弹更新日志窗口。"""
+        self._check_updates_worker(interactive=True)
+
+    def _check_updates_worker(self, interactive):
+        """后台检查线程：worker 只碰 updater/网络，结果经 after 回主线程。"""
+        if self._upd_checking:
+            return
+        self._upd_checking = True
+        channel = self._upd_channel()
+        self._refresh_upd_status_label("checking")
+        if getattr(self, "_upd_check_btn", None) is not None:
+            self._upd_check_btn.configure(state="disabled", text=t("upd.checking"))
+
+        def _work():
+            err = None
+            rel = None
+            try:
+                rel = updater.find_latest_release(channel)
+            except Exception as exc:  # noqa: BLE001 - 网络/解析错误统一回传
+                err = str(exc)
+            # Tk 的 after 只能从创建 Tcl 解释器的线程（主线程）调用；worker 线程
+            # 一律经 _log_q 派发哨兵回主线程（项目内 NSSM 状态 worker 同模式）。
+            self._log_q.put(("__UPD_CHECK_DONE__", rel, err, interactive, channel))
+
+        self._upd_worker = threading.Thread(target=_work, daemon=True)
+        self._upd_worker.start()
+
+    def _check_updates_done(self, rel, err, interactive, checked_channel=None):
+        try:
+            alive = bool(self.winfo_exists())
+        except Exception:  # noqa: BLE001
+            alive = False
+        if not alive:
+            return
+        self._upd_checking = False
+        btn = getattr(self, "_upd_check_btn", None)
+        if btn is not None and btn.winfo_exists():
+            btn.configure(state="normal", text=t("upd.check"))
+        # 用户在检查期间切换了二进制版本：丢弃过期结果
+        if checked_channel is not None and checked_channel != self._upd_channel():
+            self._refresh_upd_status_label()
+            return
+        if err:
+            self._upd_release = None
+            self._refresh_upd_status_label(("fail", err))
+            if interactive:
+                messagebox.showerror(t("upd.check.fail"),
+                                     fmt("upd.check.fail", e=err), parent=self)
+            return
+        if not rel or not rel.get("assets"):
+            self._upd_release = None
+            self._refresh_upd_status_label(("fail", t("upd.required")))
+            if interactive:
+                messagebox.showerror(t("upd.check.fail"), t("upd.required"),
+                                     parent=self)
+            return
+        self._upd_release = rel
+        cur = self._installed_build()
+        self._refresh_upd_status_label(("done", rel["tag"]))
+        if cur is not None and rel.get("build") and rel["build"] <= cur:
+            if interactive:
+                messagebox.showinfo(t("upd.uptodate"),
+                                    fmt("upd.uptodate.msg", cur=cur,
+                                        new=rel["build"]), parent=self)
+            return
+        # 有新版本（或本地版本未知）：弹更新日志窗口
+        self._show_changelog(rel, cur)
+
+    def _upd_install(self, top):
+        """「立即更新」：二次确认（停服务 + 备份路径）→ 启动后台安装线程。"""
+        rel = self._upd_release
+        if not rel or not rel.get("assets"):
+            return
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        bak = os.path.join(UPD_BACKUP_ROOT, rel["tag"], stamp)
+        try:
+            top.grab_release()
+        except Exception:  # noqa: BLE001
+            pass
+        if not messagebox.askyesno(
+                t("mb.confirm"),
+                fmt("upd.install.confirm", s=self.service, d=bak), parent=top):
+            try:
+                top.grab_set()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        try:
+            top.destroy()
+        except Exception:  # noqa: BLE001
+            pass
+        self._upd_modal_open = False
+        # 主线程快照：worker 期间 UI 切换服务/目录也不影响本次安装
+        service = self.service
+        target = self._upd_target_dir()
+        # 关窗守护：安装进行中禁止直接退出（daemon 线程会被强杀）。
+        # 安装线程改为非 daemon，即使窗口被强行销毁，线程也会把
+        # 当前文件替换/回滚步骤跑完，不会留下半更新状态的二进制。
+        self._upd_installing = True
+        self._log_q.put(t("upd.installing"))
+
+        def _work():
+            try:
+                self._do_update_worker(rel, service, target, bak)
+            except Exception as exc:  # noqa: BLE001
+                # 回滚与尽力重启已由 _do_update_worker 内部完成，这里只汇报错误
+                self._log_q.put(fmt("upd.err", e=exc))
+                self._log_q.put(("__UPD_INSTALL_ERR__", str(exc)))
+            finally:
+                self._log_q.put("__REFRESH_STATUS__")
+                # 哨兵在主线程消费：复位 _upd_installing，让关窗守护放行
+                self._log_q.put("__UPD_DONE__")
+
+        threading.Thread(target=_work, daemon=False).start()
+
+    def _do_update_worker(self, rel, service, target, bak):
+        """后台安装序列（绝不碰控件）：下载→停服→备份→逐文件替换→重启。
+
+        事务保障（短期清单第 2 条）：
+        - 备份采用逐文件原子写，备份失败即中止且未替换任何文件；
+        - 替换记录 replaced 清单，任一步失败自动从 bak 精确回滚已替换文件；
+        - 失败收尾尽力重启服务，绝不静默留下停摆服务。
+        """
+        assets = rel["assets"]
+        # 1) 下载官方资产到缓存目录（按 release tag 分目录）
+        dl_dir = os.path.join(UPD_DOWNLOAD_DIR, rel["tag"])
+        local_zips = []
+        for asset in assets:
+            dest = os.path.join(dl_dir, asset["name"])
+            if os.path.isfile(dest):
+                self._log_q.put("  " + asset["name"] + " (cached)")
+            else:
+                def _prog(done, total, name=asset["name"]):
+                    pct = int(done * 100.0 / max(total, 1))
+                    if pct in (0, 25, 50, 75, 100):
+                        self._log_q.put(fmt("upd.downloading", n=name, p=pct))
+                try:
+                    updater.download(asset["browser_download_url"], dest,
+                                     progress=_prog)
+                except Exception as exc:  # noqa: BLE001 - 下载失败清理残留
+                    for suffix in ("", ".part"):
+                        try:
+                            os.remove(dest + suffix)
+                        except OSError:
+                            pass
+                    raise UpdateError(str(exc)) from exc
+            local_zips.append(dest)
+        # 2) 停止服务（Windows 上替换二进制必须先停）；已停止则直接继续
+        self._log_q.put(fmt("upd.stopping", s=service))
+        if sc_query_state(service) != "STOPPED":
+            ok, msg = sc_action("stop", service)
+            if not ok and sc_query_state(service) != "STOPPED":
+                raise UpdateError(fmt("upd.stop.fail", m=msg))
+        stopped = False
+        for _ in range(40):
+            if sc_query_state(service) == "STOPPED":
+                stopped = True
+                break
+            time.sleep(0.5)
+        if not stopped:
+            raise UpdateError(fmt("upd.stop.fail", m="timeout"))
+        self._log_q.put(t("upd.stopped"))
+        # 3) 备份将被覆盖的旧文件（逐文件原子写；失败则中止，未替换任何文件）
+        conflicts = updater.collect_conflicts(local_zips, target)
+        if not conflicts:
+            raise UpdateError(t("upd.no.files"))
+        self._log_q.put(fmt("upd.backing", d=bak))
+        try:
+            updater.backup_files(conflicts, target, bak)
+        except OSError as exc:
+            self._log_q.put(fmt("upd.backup.fail", m=exc))
+            self._try_restart_service(service)
+            raise UpdateError(fmt("upd.backup.fail", m=exc)) from exc
+        # 4) 逐文件替换：与 conflicts 同序，失败时按 replaced 精确回滚。
+        #    同名文件以最后一个 zip 为准（与旧「按 zip 顺序逐个解压」行为一致）。
+        self._log_q.put(t("upd.extracting"))
+        sources = {}
+        for zp in local_zips:
+            for name in updater.zip_top_files(zp):
+                sources[name] = zp
+        # 与旧行为一致：先覆盖目标目录中已存在的文件，再安装 zip 新增文件
+        ordered = conflicts + [n for n in sources if n not in conflicts]
+        replaced = []   # 覆盖过的旧文件（可回滚）
+        added = []      # 目标目录原本不存在的新文件（回滚时删除）
+        try:
+            for name in ordered:
+                zp = sources.get(name)
+                if zp is None:
+                    continue
+                existed = os.path.isfile(os.path.join(target, name))
+                updater.extract_one(zp, target, name)
+                if existed:
+                    replaced.append(name)
+                else:
+                    added.append(name)
+        except Exception as exc:  # noqa: BLE001 - 替换失败：回滚已替换文件后重启收尾
+            self._log_q.put(fmt("upd.extract.fail", e=exc))
+            self._rollback_files(replaced, target, bak)
+            self._remove_added_files(added, target)
+            self._try_restart_service(service)
+            raise
+        self._log_q.put("__REFRESH_STATUS__")
+        # 5) 重启服务并等待 RUNNING；未恢复 RUNNING 则回滚旧文件
+        self._log_q.put(fmt("upd.starting", s=service))
+        sc_action("start", service)
+        running = False
+        for _ in range(120):
+            if sc_query_state(service) == "RUNNING":
+                running = True
+                break
+            time.sleep(0.5)
+        if not running:
+            self._log_q.put(fmt("upd.not.running", s=service))
+            self._rollback_files(replaced, target, bak)
+            self._remove_added_files(added, target)
+            self._try_restart_service(service)
+            raise UpdateError(fmt("upd.not.running", s=service))
+        b = updater.get_installed_build(os.path.join(target, "llama-server.exe"))
+        self._log_q.put(fmt("upd.done", s=service, b=("b%d" % b) if b else "?"))
+
+    def _rollback_files(self, names, target, bak):
+        """用备份目录恢复已替换文件（worker 线程安全：只写日志队列）。"""
+        if not names:
+            return
+        self._log_q.put(t("upd.rollback"))
+        try:
+            updater.restore_files(names, target, bak)
+            self._log_q.put(t("upd.rollback.done"))
+        except Exception as exc:  # noqa: BLE001 - 回滚失败不阻断后续重启收尾
+            self._log_q.put(fmt("upd.rollback.fail", e=exc, d=bak))
+
+    def _remove_added_files(self, names, target):
+        """删除更新新增的文件（回滚清理，worker 线程安全：只写日志队列）。"""
+        if not names:
+            return
+        try:
+            updater.remove_files(names, target)
+        except Exception as exc:  # noqa: BLE001 - 清理失败不阻断后续重启收尾
+            self._log_q.put(fmt("upd.rollback.fail", e=exc, d=target))
+
+    def _try_restart_service(self, service):
+        """更新失败收尾：若服务处于 STOPPED，尽力重启（worker 线程安全）。"""
+        try:
+            if sc_query_state(service) != "STOPPED":
+                return
+            self._log_q.put(fmt("upd.starting", s=service))
+            sc_action("start", service)
+            for _ in range(120):
+                if sc_query_state(service) == "RUNNING":
+                    break
+                time.sleep(0.5)
+        except Exception:  # noqa: BLE001 - 尽力而为，失败由外层收尾日志兜底
+            pass
+
+
+    def _show_changelog(self, rel, cur):
+        """更新日志弹窗（模态）：提示/可滚动日志/下载清单/立即更新。"""
+        if self._upd_modal_open:
+            return
+        self._upd_modal_open = True
+        top = ctk.CTkToplevel(self)
+        top.title(fmt("upd.title", t=rel["tag"]))
+        top.geometry("680x560")
+        top.transient(self)
+        try:
+            top.grab_set()
+        except Exception:  # noqa: BLE001 - 主窗口/设置窗已有 grab 时降级为普通窗口
+            pass
+        try:
+            top.lift()
+        except Exception:  # noqa: BLE001
+            pass
+
+        def _close():
+            self._upd_modal_open = False
+            try:
+                top.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+
+        head = fmt("upd.prompt", n=rel.get("build") or rel["tag"],
+                   c=("b%d" % cur) if cur else "?")
+        ctk.CTkLabel(top, text=head, font=F_BODY, text_color=C_TXT, anchor="w",
+                     justify="left", wraplength=620
+                     ).pack(fill="x", padx=24, pady=(20, 10))
+
+        ctk.CTkLabel(top, text=t("upd.changelog"), font=F_GROUP, text_color=C_MUT,
+                     anchor="w").pack(fill="x", padx=24)
+        frame = ctk.CTkFrame(top, fg_color=C_BG, border_width=1,
+                             border_color=C_BORDER, corner_radius=8)
+        frame.pack(fill="both", expand=True, padx=24, pady=(6, 10))
+        body = rel.get("body") or t("upd.status.none")
+        txt = ctk.CTkTextbox(frame, font=F_SMALL, text_color=C_TXT,
+                             fg_color=C_BG, border_width=0, wrap="word")
+        txt.pack(fill="both", expand=True, padx=8, pady=8)
+        txt.insert("1.0", body)
+        txt.configure(state="disabled")
+
+        ctk.CTkLabel(top, text=fmt("upd.assets", a=", ".join(self._upd_assets_names())),
+                     font=F_SMALL, text_color=C_MUT, anchor="w", wraplength=620,
+                     justify="left").pack(fill="x", padx=24, pady=(0, 12))
+
+        btnrow = ctk.CTkFrame(top, fg_color="transparent")
+        btnrow.pack(fill="x", padx=24, pady=(0, 20))
+        self._btn(btnrow, t("settings.close"), _close).pack(side="right")
+        self._btn(btnrow, t("upd.install"), lambda: self._upd_install(top),
+                  kind="primary").pack(side="right", padx=(0, 10))
+        top.protocol("WM_DELETE_WINDOW", _close)
+        try:
+            top.grab_set()
+        except Exception:  # noqa: BLE001 - 降级为普通窗口
+            pass
+
     def _restart_ui(self):
         """销毁并按新语言/调色板重建全部部件（设置即时生效）。"""
         _apply_palette("dark" if self.settings.get("appearance") == "dark" else "light")
         for w in self.winfo_children():
             w.destroy()
+        self._upd_modal_open = False  # 语言/外观重建会销毁更新日志弹窗，复位互斥
         self.var.clear()
         self.widgets.clear()
         self.val_labels.clear()

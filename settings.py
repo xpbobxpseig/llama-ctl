@@ -18,6 +18,8 @@ DEFAULTS = {
     "geometry": None,        # "WxH+X+Y" 字符串，None = 系统默认
     "last_preset": "",       # 最后选中的预设名
     "motion_enabled": True,   # 动效总开关（design-guide §五：关闭后动画直跳终态）
+    "upd_check_on_startup": True,  # 启动时后台自动检查官方更新（仅提示，绝不自动安装）
+    "upd_channel": "win-cuda-13.3-x64",  # 官方二进制变体（updater.CHANNELS 的键）
 }
 
 
