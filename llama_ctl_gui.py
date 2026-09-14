@@ -32,7 +32,7 @@ from nssm_adapter import (
     get_start_mode, set_start_mode, sc_query_state, sc_action,
     list_nssm_services, check_health, app_directory,
 )
-from params import parse_params, build_params
+from params import parse_params, build_params, semantically_equal
 from settings import load_settings, save_settings
 from motion import Animator, format_hex, lerp, parse_hex, ease_out_cubic, ease_in_cubic
 import strings
@@ -735,6 +735,7 @@ class ControlGUI(ctk.CTk):
         self.widgets = {}
         self.val_labels = {}
         self._stop_poll = False
+        self._restarting = False     # 重启进行中防重入（do_restart 入口必读，必须显式初始化）
         self._log_q = queue.Queue()
         # 动效引擎：注入 Tk after 作调度器（motion.py 纯数值模块）；
         # 必须在 _build_widgets 之前创建，D4 起的 hover 绑定会用到。
@@ -767,10 +768,9 @@ class ControlGUI(ctk.CTk):
         self._status_r = queue.Queue()
         self._status_worker = threading.Thread(target=self._status_worker_loop,
                                                daemon=True)
-        # dirty 主线程缓存（worker 线程不能读 Tk 变量）：6s 降频重算，
-        # 表单编辑/载入/写回时失效
+        # dirty 主线程缓存（worker 线程不能读 Tk 变量）；
+        # 表单编辑/载入/写回时置 None 失效，由 worker 重算
         self._dirty_cache = None
-        self._dirty_at = 0.0
         # ---- 官方更新状态（B 方案：ggml-org/llama.cpp）----
         self._upd_release = None      # 最近一次检查到的最新 release 信息
         self._upd_installing = False  # 官方更新安装进行中（关窗守护）
@@ -779,6 +779,7 @@ class ControlGUI(ctk.CTk):
         self._upd_worker = None       # 后台检查线程
         self._upd_modal_open = False  # 更新日志弹窗互斥（startup 提示与手动检查）
         self._upd_startup_after = None
+        self._prune_startup_after = None  # 启动清理的 after token
 
         self._build_widgets()
         self.refresh_all()
@@ -786,6 +787,8 @@ class ControlGUI(ctk.CTk):
         # 启动后 1.2s 后台检查官方更新（仅提示，绝不自动安装）
         if self.settings.get("upd_check_on_startup", True):
             self._upd_startup_after = self.after(1200, self._check_updates_startup)
+        # 启动后 2.5s 后台清理更新缓存/备份的陈旧目录（各保留最近 N 个）
+        self._prune_startup_after = self.after(2500, self._prune_update_dirs)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         # 缩放/拖拽防抖：WM_CONFIGURE 高频触发期间挂起 UI 应用与日志渲染，
         # 停止 300ms 后恢复（缩放卡顿修复）。
@@ -1641,19 +1644,6 @@ class ControlGUI(ctk.CTk):
         if names and self.preset_var.get() not in names:
             self.preset_var.set(names[0])
 
-    def save_preset(self):
-        """把当前表单存为预设。名称取自合并下拉框；已有名则覆盖更新，无弹窗。"""
-        name = self.preset_var.get().strip()
-        if not name:
-            messagebox.showwarning(t("mb.hint"), t("msg.presetname"))
-            return
-        values, _ = self._collect()
-        presets = load_presets()
-        presets[name] = values
-        save_presets(presets)
-        self.refresh_presets()
-        self.preset_var.set(name)
-
     def _sync_preset_with_form(self):
         """应用成功后同步预设：若当前下拉是已存在的预设名，用刚写回服务的
         表单覆盖该预设，保持「预设 = 服务当前参数」。
@@ -1754,12 +1744,26 @@ class ControlGUI(ctk.CTk):
         return values, self.extras
 
     def _dirty(self):
-        """表单参数与当前服务是否不一致。"""
+        """表单参数与当前服务是否存在**语义**差异。
+
+        用 semantically_equal 而非文本比较：本工具写回时统一长名、按 FIELDS
+        顺序重排、补全滑块默认值、给含引号的值加转义，文本比较会把「等价但
+        写法不同」的历史/手写参数误判为改动，一打开就常亮「未应用更改」。
+        """
         values, extras = self._collect()
-        return build_params(values, extras, FIELDS) != get_app_parameters(self.service)
+        return not semantically_equal(build_params(values, extras, FIELDS),
+                                      get_app_parameters(self.service), FIELDS)
 
     def apply_changes(self):
-        """写回表单参数；服务运行中则确认后自动重启，未运行仅写回。"""
+        """写回表单参数；服务运行中则确认后自动重启，未运行仅写回。
+
+        注意此处**故意**用文本比较（而非 _dirty 的 semantically_equal）：
+        写回是「把服务文本规范化」的动作，只要目标文本与现状不同就值得写——
+        例如服务里是历史遗留的 `-c 4096 --ctx-size 131072`，语义虽等价，
+        但写回正是修掉该冲突、统一为单一 `--ctx-size` 的时机。
+        若这里改成语义比较，用户将永远无法通过本工具规范化旧参数。
+        「是否有未应用更改」的提示判定用 _dirty（语义），与写回动作分离。
+        """
         values, extras = self._collect()
         new_text = build_params(values, extras, FIELDS)
         cur = get_app_parameters(self.service)
@@ -2036,9 +2040,16 @@ class ControlGUI(ctk.CTk):
         self.txt_log.configure(state="disabled")
 
     def _clear_flash_tag(self):
-        """新行渐隐收尾：移除 flash 背景 tag（控件销毁后调用会抛 TclError，吞掉）。"""
+        """新行渐隐收尾：移除 flash 覆盖范围（保留 tag 本身的背景色定义）。
+
+        必须用 tag_remove 而非 tag_delete——Tk 的 tag delete 会连标签的
+        background **定义**一起删掉，而下一批日志只做 tag_add 范围、
+        不再 tag_configure，于是第二轮起新行高亮静默失效（真实 CTkTextbox
+        实测：收尾后 tag_cget('flash','background') 报 tag 未定义）。
+        控件销毁后调用会抛 TclError，吞掉。
+        """
         try:
-            self.txt_log._textbox.tag_delete("flash")
+            self.txt_log._textbox.tag_remove("flash", "1.0", "end")
         except Exception:  # noqa: BLE001 - 控件已销毁/重建时无需处理
             pass
 
@@ -2094,7 +2105,9 @@ class ControlGUI(ctk.CTk):
                     if snapshot is not None:
                         try:
                             cur = get_app_parameters(svc)
-                            dirty = build_params(snapshot, self.extras, FIELDS) != cur
+                            # 与 _dirty() 同一语义判据（文本比较会误报历史/手写参数）
+                            dirty = not semantically_equal(
+                                build_params(snapshot, self.extras, FIELDS), cur, FIELDS)
                         except Exception:  # noqa: BLE001
                             dirty = None
                     self._status_r.put(("result", state, ok, detail, dirty))
@@ -2254,6 +2267,12 @@ class ControlGUI(ctk.CTk):
             except Exception:  # noqa: BLE001
                 pass
             self._upd_startup_after = None
+        if getattr(self, "_prune_startup_after", None) is not None:
+            try:
+                self.after_cancel(self._prune_startup_after)
+            except Exception:  # noqa: BLE001
+                pass
+            self._prune_startup_after = None
         self.anim.cancel_all()  # 停掉全部在途动画，帧回调发现不在注册表即自停
         # 取消全部按钮渐隐 after 帧（F1：无泄漏 after；按钮销毁后回调自吞 TclError）
         for tok in list(self._hover_fades.values()):
@@ -2296,10 +2315,13 @@ class ControlGUI(ctk.CTk):
 
         ctk.CTkLabel(win, text=t("settings.lang"), font=F_BODY, anchor="w"
                      ).pack(fill="x", padx=20, pady=(20, 4))
+        # 用显式变量绑定：取消未应用更改保护时能把下拉显示回滚到实际语言/外观
+        self._lang_var = tk.StringVar(
+            value="中文" if strings._current == "zh" else "English")
         lang_menu = ctk.CTkOptionMenu(
             win, values=["中文", "English"], width=180, font=F_BODY,
+            variable=self._lang_var,
             command=lambda v: self._change_language(v, win))
-        lang_menu.set("中文" if strings._current == "zh" else "English")
         lang_menu.pack(anchor="w", padx=20)
 
         ctk.CTkLabel(win, text=t("settings.appear"), font=F_BODY, anchor="w"
@@ -2307,11 +2329,13 @@ class ControlGUI(ctk.CTk):
         appear_names = {"system": t("appear.system"), "light": t("appear.light"),
                         "dark": t("appear.dark")}
         rev = {v: k for k, v in appear_names.items()}
+        self._appear_var = tk.StringVar(
+            value=appear_names.get(self.settings.get("appearance", "system"),
+                                   t("appear.system")))
         appear_menu = ctk.CTkOptionMenu(
             win, values=list(appear_names.values()), width=180, font=F_BODY,
+            variable=self._appear_var,
             command=lambda v: self._change_appearance(rev[v], win))
-        appear_menu.set(appear_names.get(self.settings.get("appearance", "system"),
-                                         t("appear.system")))
         appear_menu.pack(anchor="w", padx=20)
 
         # 动效总开关（即时生效，无需 _restart_ui）
@@ -2366,17 +2390,66 @@ class ControlGUI(ctk.CTk):
         self._btn(win, t("settings.close"), win.destroy).pack(pady=(14, 12))
 
     def _change_language(self, shown, win=None):
+        if not self._confirm_rebuild_dirty():
+            self._restore_setting_widgets()   # 取消：下拉显示回滚到实际语言
+            return
         self.settings["language"] = "zh" if shown == "中文" else "en"
         strings.set_lang(self.settings["language"])
         save_settings(self.settings)
         self._restart_ui()
 
     def _change_appearance(self, mode, win=None):
+        if not self._confirm_rebuild_dirty():
+            self._restore_setting_widgets()   # 取消：下拉显示回滚到实际外观
+            return
         self.settings["appearance"] = mode
         save_settings(self.settings)
         ctk.set_appearance_mode({"system": "system", "light": "light",
                                  "dark": "dark"}[mode])
         self._restart_ui()
+
+    def _restore_setting_widgets(self):
+        """把设置页语言/外观下拉的显示回滚到实际生效值（取消保护后调用）。"""
+        try:
+            var = getattr(self, "_lang_var", None)
+            if var is not None and var.winfo_exists():
+                var.set("中文" if strings._current == "zh" else "English")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            var = getattr(self, "_appear_var", None)
+            if var is not None and var.winfo_exists():
+                cur = self.settings.get("appearance", "system")
+                names = {"system": t("appear.system"), "light": t("appear.light"),
+                         "dark": t("appear.dark")}
+                var.set(names.get(cur, t("appear.system")))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _confirm_rebuild_dirty(self):
+        """切换语言/外观前的未应用更改保护（_restart_ui 会重建界面并丢弃表单）。
+
+        _restart_ui → refresh_all → load_params 会用服务当前值覆盖表单，
+        因此若不设防，用户改完参数没点「应用更改」就切语言，编辑会静默消失。
+        与切服务/切预设同策略：确认后自动备份为新预设，取消则整体中止
+        （调用方在弹确认前就返回，既不重建 UI 也不写 settings）。
+
+        返回 True = 可以继续；False = 用户取消，调用方必须原样返回。
+        """
+        try:
+            dirty = self._dirty()
+        except Exception:  # noqa: BLE001 - 读取失败不阻断设置切换（保守放行）
+            return True
+        if not dirty:
+            return True
+        if not messagebox.askyesno(t("mb.confirm"), t("msg.rebuild.dirty"), parent=self):
+            return False
+        values, _ = self._collect()
+        presets = load_presets()
+        presets[fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M:%S'))] = values
+        save_presets(presets)
+        self.refresh_presets()
+        return True
 
     def _change_motion(self):
         """动效开关回调：写设置并落盘，即时生效，不重启 UI。"""
@@ -2398,6 +2471,35 @@ class ControlGUI(ctk.CTk):
         except Exception:  # noqa: BLE001
             pass
         return LLAMA_DIR
+
+    # 更新缓存/备份的保留份数（每次安装新增一个 tag/时间戳目录，长期堆积可达 GB 级）
+    PRUNE_KEEP = 3
+
+    def _prune_update_dirs(self):
+        """启动后台清理 downloads/{tag} 与 backup/{tag}/{时间戳} 的陈旧目录。
+
+        放后台线程：目录可达 GB 级，rmtree 不应占主线程。任何异常一律静默
+        吞掉——清理失败绝不能弹窗或阻断启动；确有删除时经 _log_q 写一行日志
+        （_log_q 是线程安全入口，UI 由 _drain_log 在主线程渲染）。
+        """
+        self._prune_startup_after = None
+
+        def _work():
+            for root in (UPD_DOWNLOAD_DIR, UPD_BACKUP_ROOT):
+                try:
+                    removed = updater.prune_old_subdirs(root, keep=self.PRUNE_KEEP)
+                except Exception:  # noqa: BLE001 - 清理失败绝不打扰用户
+                    continue
+                if removed:
+                    try:
+                        self._log_q.put(fmt("upd.prune", n=len(removed), d=root))
+                    except Exception:  # noqa: BLE001
+                        pass
+
+        try:
+            threading.Thread(target=_work, daemon=True).start()
+        except Exception:  # noqa: BLE001 - 线程创建失败不阻断启动
+            pass
 
     def _upd_server_exe(self):
         return os.path.join(self._upd_target_dir(), "llama-server.exe")

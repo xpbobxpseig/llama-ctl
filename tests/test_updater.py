@@ -251,3 +251,99 @@ def test_extract_one_failure_cleans_temp(tmp_path, monkeypatch):
 
     assert (dest / "a.dll").read_text(encoding="utf-8") == "OLD"
     assert not os.path.exists(str(dest / "a.dll.llama_ctl_new"))
+
+
+# ---------------------------------------------------------------------------
+# prune_old_subdirs：更新缓存/备份的滚动保留策略
+# 安全红线：只删子目录，绝不删普通文件
+# ---------------------------------------------------------------------------
+
+def _make_dirs(root, spec):
+    """spec: {name: mtime}，建子目录并设 mtime。"""
+    for name, mtime in spec.items():
+        d = root / name
+        d.mkdir()
+        (d / "payload.bin").write_text("x", encoding="utf-8")
+        os.utime(str(d), (mtime, mtime))
+    return root
+
+
+def test_prune_keeps_newest_n(tmp_path):
+    root = tmp_path / "downloads"
+    root.mkdir()
+    _make_dirs(root, {"old1": 1000, "old2": 2000, "new1": 3000, "new2": 4000})
+
+    removed = updater.prune_old_subdirs(str(root), keep=2)
+
+    assert sorted(removed) == ["old1", "old2"]
+    assert sorted(p.name for p in root.iterdir()) == ["new1", "new2"]
+
+
+def test_prune_never_deletes_plain_files(tmp_path):
+    """安全红线：root 下的普通文件必须毫发无损。"""
+    root = tmp_path / "downloads"
+    root.mkdir()
+    (root / "README.txt").write_text("keep me", encoding="utf-8")
+    (root / "stray.zip").write_text("keep me too", encoding="utf-8")
+    _make_dirs(root, {"a": 1000, "b": 2000, "c": 3000})
+
+    removed = updater.prune_old_subdirs(str(root), keep=1)
+
+    assert sorted(removed) == ["a", "b"]
+    assert (root / "README.txt").read_text(encoding="utf-8") == "keep me"
+    assert (root / "stray.zip").read_text(encoding="utf-8") == "keep me too"
+
+
+def test_prune_missing_root_returns_empty(tmp_path):
+    assert updater.prune_old_subdirs(str(tmp_path / "nope"), keep=3) == []
+
+
+def test_prune_keep_zero_deletes_nothing(tmp_path):
+    """keep <= 0 不得清空历史（防误调用）。"""
+    root = tmp_path / "backup"
+    root.mkdir()
+    _make_dirs(root, {"a": 1000, "b": 2000})
+
+    assert updater.prune_old_subdirs(str(root), keep=0) == []
+    assert sorted(p.name for p in root.iterdir()) == ["a", "b"]
+
+
+def test_prune_fewer_than_keep_deletes_nothing(tmp_path):
+    root = tmp_path / "backup"
+    root.mkdir()
+    _make_dirs(root, {"only": 1000})
+
+    assert updater.prune_old_subdirs(str(root), keep=3) == []
+    assert [p.name for p in root.iterdir()] == ["only"]
+
+
+def test_prune_default_keep_is_three(tmp_path):
+    root = tmp_path / "backup"
+    root.mkdir()
+    _make_dirs(root, {("d%d" % i): 1000 * i for i in range(1, 6)})
+
+    removed = updater.prune_old_subdirs(str(root))
+
+    assert sorted(removed) == ["d1", "d2"]
+    assert sorted(p.name for p in root.iterdir()) == ["d3", "d4", "d5"]
+
+
+def test_prune_aggregates_errors_without_stopping(tmp_path, monkeypatch):
+    """首个删除失败不得中断其余删除；聚合后抛 OSError。"""
+    root = tmp_path / "backup"
+    root.mkdir()
+    _make_dirs(root, {"a": 1000, "b": 2000, "c": 3000})
+
+    real_rmtree = updater.shutil.rmtree
+
+    def flaky_rmtree(path, *a, **kw):
+        if os.path.basename(path) == "a":
+            raise OSError("locked")
+        return real_rmtree(path, *a, **kw)
+
+    monkeypatch.setattr(updater.shutil, "rmtree", flaky_rmtree)
+    with pytest.raises(OSError) as ei:
+        updater.prune_old_subdirs(str(root), keep=1)
+    assert "a" in str(ei.value)
+    # b 仍被删掉（未因 a 失败而中断）
+    assert sorted(p.name for p in root.iterdir()) == ["a", "c"]

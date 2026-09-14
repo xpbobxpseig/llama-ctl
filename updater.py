@@ -278,3 +278,36 @@ def remove_files(names, dest_dir):
             errors.append("%s: %s" % (name, exc))
     if errors:
         raise OSError("; ".join(errors))
+
+
+def prune_old_subdirs(root, keep=3):
+    """只保留 root 下 mtime 最新的 keep 个子目录，删除其余，返回被删目录名。
+
+    用于更新缓存（downloads/{tag}/）与备份（backup/{tag}/{时间戳}/）的滚动清理：
+    这两处每装一次就新增一个目录，长期堆积可达 GB 级。
+
+    安全边界：
+      - **只处理子目录**；root 下的普通文件一律不动（绝不删文件）。
+      - root 不存在 → 返回 []（首次运行尚无缓存属正常）。
+      - keep <= 0 → 不删除任何内容，返回 []（防误调用清空历史）。
+    失败按 remove_files 的风格聚合错误后抛 OSError，不在首个失败处中断。
+    """
+    if keep <= 0 or not root or not os.path.isdir(root):
+        return []
+    try:
+        entries = [e for e in os.scandir(root) if e.is_dir()]
+    except OSError as exc:
+        raise OSError("扫描失败 %s: %s" % (root, exc)) from exc
+    # mtime 降序；mtime 相同时按名降序，保证结果稳定可测
+    entries.sort(key=lambda e: (e.stat().st_mtime, e.name), reverse=True)
+    removed = []
+    errors = []
+    for entry in entries[keep:]:
+        try:
+            shutil.rmtree(entry.path)
+            removed.append(entry.name)
+        except OSError as exc:  # noqa: BLE001 - 聚合后统一抛出
+            errors.append("%s: %s" % (entry.name, exc))
+    if errors:
+        raise OSError("; ".join(errors))
+    return removed

@@ -15,7 +15,6 @@ _current = "zh"
 STRINGS = {
     # ---- 标题 / 卡片 ----
     "app.title":        {"zh": "llama.cpp 服务控制台", "en": "llama.cpp Service Console"},
-    "card.service":     {"zh": "服务", "en": "Service"},
     "card.presets":     {"zh": "参数预设", "en": "Presets"},
     "card.params":      {"zh": "启动参数", "en": "Launch Parameters"},
     # ---- 顶栏 ----
@@ -28,7 +27,6 @@ STRINGS = {
     "boot.manual":      {"zh": "手动", "en": "Manual"},
     "boot.disabled":    {"zh": "禁用", "en": "Disabled"},
     # ---- 预设 ----
-    "preset.name.ph":   {"zh": "预设名（输入或选）", "en": "Preset name (type or pick)"},  # 27ch，空 combo 展位不溢出
     "preset.delete":    {"zh": "删除", "en": "Delete"},
     "preset.autobackup":{"zh": "自动备份 {t}", "en": "Auto backup {t}"},
     # ---- 参数区 ----
@@ -93,13 +91,13 @@ STRINGS = {
     "msg.restarting":   {"zh": "重启进行中，请稍候…", "en": "Restart in progress…"},
     "msg.close.busy":   {"zh": "后台任务正在进行（重启或官方更新）。\n\n立即退出可能让服务停摆，或留下半更新状态的二进制文件。\n\n确定要强制退出吗？",
                          "en": "A background task is running (restart or official update).\n\nExiting now could leave the service down or the binaries half-updated.\n\nForce quit anyway?"},
-    "msg.close.wait":   {"zh": "请等待任务完成后再关闭窗口。",
-                         "en": "Please wait for the task to finish before closing."},
     "msg.write.fail":   {"zh": "写回失败：{o}", "en": "Write failed: {o}"},
     "msg.auto.fail":    {"zh": "开机自启设置失败：{o}", "en": "Auto-start change failed: {o}"},
     "msg.auto.confirm": {"zh": "将开机自启设为「{m}」？", "en": "Set auto-start to \"{m}\"?"},
     "msg.svc.dirty":    {"zh": "当前表单有未应用的更改，切换服务将丢失。是否先把当前表单自动备份为新预设再切换？",
                          "en": "The form has unapplied changes. Switch now and auto-backup the form as a new preset?"},  # 88ch，messagebox 自换行
+    "msg.rebuild.dirty":{"zh": "当前表单有未应用的更改，切换语言 / 外观会重建界面并丢失这些更改。是否先自动备份为新预设再继续？",
+                         "en": "The form has unapplied changes. Switching language/appearance rebuilds the UI and discards them. Auto-backup as a new preset and continue?"},
     "msg.apply.run":    {"zh": "服务正在运行，将写回新参数并自动重启（{s}）：\n\n新参数：\n{n}\n\n旧参数：\n{o}\n\n确认？",
                          "en": "Service is running; parameters will be written and the service restarted ({s}):\n\nNew:\n{n}\n\nOld:\n{o}\n\nProceed?"},
     "msg.apply.stop":   {"zh": "即将写回 NSSM AppParameters（服务 {s}，当前未运行）：\n\n新参数：\n{n}\n\n旧参数：\n{o}\n\n确认写回？",
@@ -111,14 +109,12 @@ STRINGS = {
       "upd.auto.label":   {"zh": "启动时自动检查（仅提示，绝不自动安装）",
                           "en": "Check on startup (notify only, never auto-install)"},
       "upd.check":        {"zh": "立即检查更新", "en": "Check for updates"},
-      "upd.view":         {"zh": "查看并更新", "en": "View & update"},
       "upd.status.now":   {"zh": "当前：{b}", "en": "Installed: {b}"},
       "upd.status.unknown":{"zh": "当前版本未知（无法读取 llama-server.exe）",
                           "en": "Installed version unknown (llama-server.exe unreadable)"},
       "upd.status.none":  {"zh": "还未检查过更新", "en": "Not checked yet"},
       "upd.checking":     {"zh": "正在检查官方最新版本…", "en": "Checking official releases…"},
       "upd.check.done":   {"zh": "最新：{t}", "en": "Latest: {t}"},
-      "upd.check.upd":    {"zh": "最新：{t}（点击查看并更新）", "en": "Latest: {t} (click to view & update)"},
       "upd.check.fail":   {"zh": "检查失败：{e}", "en": "Check failed: {e}"},
       "upd.uptodate":     {"zh": "已是最新", "en": "Up to date"},
       "upd.uptodate.msg": {"zh": "当前 b{cur} 已是最新官方构建（b{new}）。",
@@ -154,9 +150,8 @@ STRINGS = {
       "upd.err.title":    {"zh": "更新失败", "en": "Update failed"},
       "upd.required":     {"zh": "未找到匹配的官方资产。请确认二进制版本选择是否正确。",
                           "en": "No matching official asset found. Check the build variant setting."},
-      "upd.startup.title":{"zh": "官方更新", "en": "Official update"},
-      "upd.startup.msg":  {"zh": "llama.cpp 官方最新 b{n}，当前 b{c}。\n\n是否查看更新日志并考虑更新？",
-                          "en": "Official latest b{n}, installed b{c}.\n\nView the changelog and consider updating?"},
+      "upd.prune":        {"zh": "已清理 {n} 个陈旧目录：{d}",
+                          "en": "Pruned {n} stale directories: {d}"},
 }
 
 

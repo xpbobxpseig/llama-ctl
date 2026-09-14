@@ -163,3 +163,30 @@ def build_params(values, extras, fields):
         return t
 
     return " ".join(_quote(t) for t in out)
+
+
+def semantically_equal(a, b, fields):
+    """两条 AppParameters 文本在**语义**上是否等价（而非文本相同）。
+
+    用途：GUI 的「未应用更改」判定。直接比较文本会把「等价但写法不同」当成
+    改动而误报——本工具写回时统一长名、按 FIELDS 顺序重排、补全滑块默认值、
+    给含引号的值加转义，于是任何不是本工具亲手写回的参数（历史遗留 / 手写 /
+    其他工具生成）一打开就常亮「未应用更改」。
+
+    判据：两侧各自 parse_params 后比较 (values, extras)。
+      - 别名（-ngl vs --n-gpu-layers）、顺序、滑块默认值缺省、引号/转义差异
+        → 解析结果相同 → 等价；
+      - 数值真差异、check 开关增删、extras 增删 → 不等价。
+
+    extras 按**列表顺序**比较：extras 相对已识别字段的位置无关紧要
+    （build_params 统一把它们追加到末尾），但它们彼此的相对次序可能携带
+    语义（如 `--override-tensor A=B` 这类成对参数），故不做排序归一。
+
+    解析异常时返回 False（无法证明等价即视为有改动，宁可多提示不可漏提示）。
+    """
+    try:
+        va, ea, _ = parse_params(a, fields)
+        vb, eb, _ = parse_params(b, fields)
+    except Exception:  # noqa: BLE001 - 字段契约损坏/解析异常：保守判为不同
+        return False
+    return va == vb and ea == eb

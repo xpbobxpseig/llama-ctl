@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from params import parse_params, build_params, split_args
+from params import parse_params, build_params, split_args, semantically_equal
 
 
 def _fields():
@@ -24,6 +24,24 @@ def _fields():
 
 
 F = _fields()
+
+
+def _alias_fields():
+    """带短/长别名的字段集，用于语义等价的别名差异用例。"""
+    return [
+        {"key": "model", "kind": "path", "aliases": ["-m", "--model"]},
+        {"key": "ngl", "kind": "slider", "aliases": ["-ngl", "--n-gpu-layers"],
+         "min": 0, "max": 200, "step": 1, "default": 99},
+        {"key": "ctx_size", "kind": "slider", "aliases": ["--ctx-size", "-c"],
+         "min": 512, "max": 1048576, "step": 512, "default": 131072,
+         "label": "上下文长度"},
+        {"key": "ctk", "kind": "combo", "aliases": ["--cache-type-k", "-ctk"]},
+        {"key": "host", "kind": "combo", "aliases": ["--host"]},
+        {"key": "port", "kind": "text", "aliases": ["--port"]},
+    ]
+
+
+A = _alias_fields()
 
 # --- 冲突修复（ADR-0003 记录的真实 bug）---
 
@@ -201,3 +219,88 @@ def test_quoted_path_roundtrip():
     assert 'C:\\\\Models\\\\My Model\\\\qwen.gguf' in rebuilt
     v2, e2, _ = parse_params(rebuilt, F)
     assert v2 == vals and e2 == extras
+
+
+# ---------------------------------------------------------------------------
+# semantically_equal：语义等价判定（消除「未应用更改」误报）
+#
+# 误报根因：本工具写回时统一长名、按 FIELDS 顺序重排、补全滑块默认值、给含引号
+# 的值加转义，于是「等价但写法不同」的历史/手写参数一打开就常亮橙点。
+# ---------------------------------------------------------------------------
+
+def test_semantically_equal_alias_forms():
+    # -ngl/-c 短名 vs --n-gpu-layers/--ctx-size 长名：同一语义
+    a = "-m m.gguf -ngl 99 -c 8192"
+    b = "--model m.gguf --n-gpu-layers 99 --ctx-size 8192"
+    assert semantically_equal(a, b, _alias_fields())
+
+
+def test_semantically_equal_reordered_flags():
+    # 顺序差异不算改动（build_params 总是按 FIELDS 顺序输出）
+    a = "--ctx-size 8192 --model m.gguf --cache-type-k q4_0"
+    b = "--model m.gguf --cache-type-k q4_0 --ctx-size 8192"
+    assert semantically_equal(a, b, F)
+
+
+def test_semantically_equal_slider_default_missing_vs_explicit():
+    # 一侧缺省 → parse 回填 default；另一侧显式给同值 → 等价
+    a = "--model m.gguf"
+    b = "--model m.gguf --ctx-size 131072"
+    assert semantically_equal(a, b, F)
+
+
+def test_semantically_equal_quoted_and_escaped_paths():
+    # 引号/转义写法差异：解析后是同一路径
+    a = '--model "C:\\Models\\My Model\\q.gguf" --ctx-size 8192'
+    b = '--model "C:\\\\Models\\\\My Model\\\\q.gguf" --ctx-size 8192'
+    assert semantically_equal(a, b, F)
+
+
+def test_semantically_not_equal_real_value_diff():
+    assert not semantically_equal("--ctx-size 65536", "--ctx-size 32768", F)
+
+
+def test_semantically_not_equal_check_flag_toggle():
+    assert not semantically_equal("--model m.gguf --jinja", "--model m.gguf", F)
+
+
+def test_semantically_not_equal_extras_added_or_removed():
+    # extras 增删必须检出——否则用户删掉 --no-reasoning-preserve 检测不到
+    a = "--model m.gguf --no-reasoning-preserve"
+    b = "--model m.gguf"
+    assert not semantically_equal(a, b, F)
+
+
+def test_semantically_equal_extras_position_irrelevant():
+    # extras 相对已识别字段的位置不算改动（build_params 统一追加到末尾）
+    a = "--no-reasoning-preserve --model m.gguf --ctx-size 8192"
+    b = "--model m.gguf --ctx-size 8192 --no-reasoning-preserve"
+    assert semantically_equal(a, b, F)
+
+
+def test_semantically_equal_legacy_conflict_form():
+    # ADR-0003 记录的历史冲突参数 -c + --ctx-size：本工具保留最后一项，
+    # 应与「仅保留最后一项」的规范写法等价（比较用的是解析后结果）
+    a = "-c 4096 --ctx-size 131072 --model m.gguf"
+    b = "--ctx-size 131072 --model m.gguf"
+    assert semantically_equal(a, b, F)
+
+
+def test_semantically_equal_robust_to_bad_input():
+    # 健壮性：None / 空串 / 未闭合引号 稳定返回 bool，不抛异常
+    for bad in (None, "", '"unclosed', "--model"):
+        for other in (None, "", "--model m.gguf"):
+            got = semantically_equal(bad, other, F)
+            assert isinstance(got, bool)
+
+
+def test_semantically_equal_empty_vs_empty():
+    assert semantically_equal("", None, F)
+    assert semantically_equal("", "", F)
+
+
+def test_semantically_equal_other_tool_short_flags():
+    # 其他工具生成的短参写法 vs 本工具规范重建：必须判等价（spec P1-3 场景）
+    a = "-m m.gguf -ngl 99 -c 8192 --host 0.0.0.0 --port 8080"
+    b = build_params(*parse_params(a, _alias_fields())[:2], _alias_fields())
+    assert semantically_equal(a, b, _alias_fields())
