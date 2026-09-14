@@ -347,3 +347,132 @@ def test_prune_aggregates_errors_without_stopping(tmp_path, monkeypatch):
     assert "a" in str(ei.value)
     # b 仍被删掉（未因 a 失败而中断）
     assert sorted(p.name for p in root.iterdir()) == ["a", "c"]
+
+
+# ---------------------------------------------------------------------------
+# 下载完整性：截断不得转正（真实故障回归）
+#
+# 实测故障：某次主二进制只落地 1,061,602 B（应为 149,703,589 B），因为
+# download() 把「连接提前 EOF」与「正常读完」当同一出口，随后无条件
+# os.replace 把残缺文件转正；缓存复用又只看 os.path.isfile，于是每次重试
+# 都用同一个坏文件，更新永久失败。
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    """伪造 urlopen 响应：可按 Content-Length 与实收字节数制造截断。"""
+
+    def __init__(self, payload, content_length=None):
+        self._payload = payload
+        self._pos = 0
+        self.headers = {}
+        if content_length is not None:
+            self.headers["Content-Length"] = str(content_length)
+
+    def read(self, n=-1):
+        if self._pos >= len(self._payload):
+            return b""                      # 模拟连接断开 / 正常读完
+        if n is None or n < 0:
+            n = len(self._payload) - self._pos
+        chunk = self._payload[self._pos:self._pos + n]
+        self._pos += len(chunk)
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _zip_bytes(files):
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_is_valid_zip_accepts_real_zip(tmp_path):
+    p = tmp_path / "good.zip"
+    p.write_bytes(_zip_bytes({"a.dll": "A"}))
+    assert updater.is_valid_zip(str(p)) is True
+
+
+def test_is_valid_zip_rejects_truncated(tmp_path):
+    """真实故障形态：前 1MiB 是合法 zip 头，但整体被截断。"""
+    data = _zip_bytes({"a.dll": "A" * 5000})
+    p = tmp_path / "trunc.zip"
+    p.write_bytes(data[:max(1, len(data) // 3)])
+    assert updater.is_valid_zip(str(p)) is False
+
+
+def test_is_valid_zip_rejects_missing_and_nonzip(tmp_path):
+    assert updater.is_valid_zip(str(tmp_path / "nope.zip")) is False
+    txt = tmp_path / "plain.zip"
+    txt.write_text("not a zip at all", encoding="utf-8")
+    assert updater.is_valid_zip(str(txt)) is False
+
+
+def test_is_valid_zip_never_raises(tmp_path):
+    """校验函数不得因损坏/异常输入而抛出（含 None、目录、空路径）。"""
+    d = tmp_path / "adir"
+    d.mkdir()
+    for bad in (None, "", str(d), str(tmp_path / "missing")):
+        assert updater.is_valid_zip(bad) is False
+
+
+def test_download_rejects_truncated_by_content_length(tmp_path, monkeypatch):
+    """声明 100 字节、实收 10 字节 → 抛错，且 dest 与 .part 都不存在。"""
+    dest = str(tmp_path / "big.zip")
+    monkeypatch.setattr(updater, "urlopen",
+                        lambda *a, **k: _FakeResp(b"X" * 10, content_length=100))
+
+    with pytest.raises(updater.UpdateError) as ei:
+        updater.download("https://x/big.zip", dest)
+
+    assert "不完整" in str(ei.value)
+    assert not os.path.exists(dest), "截断产物不得转正为 dest"
+    assert not os.path.exists(dest + ".part"), ".part 必须清理"
+
+
+def test_download_rejects_invalid_zip_when_length_unknown(tmp_path, monkeypatch):
+    """Content-Length 不可知 + 内容非 zip → 仍在转正前拦下。"""
+    dest = str(tmp_path / "unknown.zip")
+    monkeypatch.setattr(updater, "urlopen",
+                        lambda *a, **k: _FakeResp(b"garbage-not-a-zip"))
+
+    with pytest.raises(updater.UpdateError) as ei:
+        updater.download("https://x/unknown.zip", dest)
+
+    assert not os.path.exists(dest)
+    assert not os.path.exists(dest + ".part")
+
+
+def test_download_happy_path_still_works(tmp_path, monkeypatch):
+    """完整下载且长度匹配：正常落地，内容一致（不得回归）。"""
+    payload = _zip_bytes({"a.dll": "A", "b.dll": "BB"})
+    dest = str(tmp_path / "ok.zip")
+    monkeypatch.setattr(updater, "urlopen",
+                        lambda *a, **k: _FakeResp(payload, content_length=len(payload)))
+
+    got = updater.download("https://x/ok.zip", dest)
+
+    assert got == dest
+    assert os.path.isfile(dest)
+    assert open(dest, "rb").read() == payload
+    assert not os.path.exists(dest + ".part")
+    assert updater.is_valid_zip(dest) is True
+
+
+def test_download_reports_progress_and_completes(tmp_path, monkeypatch):
+    """进度回调仍被调用，且回调次数随分块推进（happy path 行为保持）。"""
+    payload = _zip_bytes({"a.dll": "A" * 10})
+    dest = str(tmp_path / "p.zip")
+    monkeypatch.setattr(updater, "urlopen",
+                        lambda *a, **k: _FakeResp(payload, content_length=len(payload)))
+    seen = []
+
+    updater.download("https://x/p.zip", dest, progress=lambda d, t: seen.append((d, t)))
+
+    assert seen and seen[-1] == (len(payload), len(payload))

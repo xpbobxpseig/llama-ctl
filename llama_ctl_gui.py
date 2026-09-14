@@ -2681,9 +2681,19 @@ class ControlGUI(ctk.CTk):
         local_zips = []
         for asset in assets:
             dest = os.path.join(dl_dir, asset["name"])
-            if os.path.isfile(dest):
+            # 缓存必须验有效性再复用：一次截断若被当作「已缓存」，之后每次重试
+            # 都拿同一个坏文件，更新会**永久失败**（实测故障）。坏缓存直接删除重下。
+            if os.path.isfile(dest) and updater.is_valid_zip(dest):
                 self._log_q.put("  " + asset["name"] + " (cached)")
             else:
+                if os.path.isfile(dest):
+                    self._log_q.put(fmt("upd.cache.bad", n=asset["name"]))
+                    try:
+                        os.remove(dest)
+                    except OSError as exc:
+                        raise UpdateError(fmt("upd.cache.del.fail",
+                                              n=asset["name"], e=exc)) from exc
+
                 def _prog(done, total, name=asset["name"]):
                     pct = int(done * 100.0 / max(total, 1))
                     if pct in (0, 25, 50, 75, 100):
@@ -2698,6 +2708,13 @@ class ControlGUI(ctk.CTk):
                         except OSError:
                             pass
                     raise UpdateError(str(exc)) from exc
+                # 重下后仍无效：明确中止，不进后续备份/替换
+                if not updater.is_valid_zip(dest):
+                    try:
+                        os.remove(dest)
+                    except OSError:
+                        pass
+                    raise UpdateError(fmt("upd.cache.still.bad", n=asset["name"]))
             local_zips.append(dest)
         # 2) 停止服务（Windows 上替换二进制必须先停）；已停止则直接继续
         self._log_q.put(fmt("upd.stopping", s=service))
@@ -2715,8 +2732,16 @@ class ControlGUI(ctk.CTk):
             raise UpdateError(fmt("upd.stop.fail", m="timeout"))
         self._log_q.put(t("upd.stopped"))
         # 3) 备份将被覆盖的旧文件（逐文件原子写；失败则中止，未替换任何文件）
-        conflicts = updater.collect_conflicts(local_zips, target)
+        #    此时服务**已停止**，故本段任何失败都必须尽力把服务拉起来，
+        #    否则会留下一个停摆的服务。
+        try:
+            conflicts = updater.collect_conflicts(local_zips, target)
+        except Exception as exc:  # noqa: BLE001 - 坏 zip / IO 错误转为可读提示
+            self._log_q.put(fmt("upd.zip.bad", e=exc))
+            self._try_restart_service(service)
+            raise UpdateError(fmt("upd.zip.bad", e=exc)) from exc
         if not conflicts:
+            self._try_restart_service(service)
             raise UpdateError(t("upd.no.files"))
         self._log_q.put(fmt("upd.backing", d=bak))
         try:
@@ -2727,11 +2752,17 @@ class ControlGUI(ctk.CTk):
             raise UpdateError(fmt("upd.backup.fail", m=exc)) from exc
         # 4) 逐文件替换：与 conflicts 同序，失败时按 replaced 精确回滚。
         #    同名文件以最后一个 zip 为准（与旧「按 zip 顺序逐个解压」行为一致）。
+        #    注意：服务此时**已停止**，故列举 zip 条目失败（坏包）也必须恢复服务。
         self._log_q.put(t("upd.extracting"))
         sources = {}
-        for zp in local_zips:
-            for name in updater.zip_top_files(zp):
-                sources[name] = zp
+        try:
+            for zp in local_zips:
+                for name in updater.zip_top_files(zp):
+                    sources[name] = zp
+        except Exception as exc:  # noqa: BLE001 - 坏 zip：可读提示 + 恢复服务
+            self._log_q.put(fmt("upd.zip.bad", e=exc))
+            self._try_restart_service(service)
+            raise UpdateError(fmt("upd.zip.bad", e=exc)) from exc
         # 与旧行为一致：先覆盖目标目录中已存在的文件，再安装 zip 新增文件
         ordered = conflicts + [n for n in sources if n not in conflicts]
         replaced = []   # 覆盖过的旧文件（可回滚）

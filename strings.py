@@ -152,6 +152,14 @@ STRINGS = {
                           "en": "No matching official asset found. Check the build variant setting."},
       "upd.prune":        {"zh": "已清理 {n} 个陈旧目录：{d}",
                           "en": "Pruned {n} stale directories: {d}"},
+      "upd.cache.bad":    {"zh": "缓存已损坏，正在删除并重新下载：{n}",
+                          "en": "Cached file is corrupt; deleting and re-downloading: {n}"},
+      "upd.cache.del.fail":{"zh": "无法删除损坏的缓存 {n}：{e}。请手动删除该文件后重试。",
+                          "en": "Cannot delete corrupt cache {n}: {e}. Please remove the file manually and retry."},
+      "upd.cache.still.bad":{"zh": "重新下载后 {n} 仍不是有效的 zip，更新已中止。请检查网络后重试。",
+                          "en": "After re-downloading, {n} is still not a valid zip. Update aborted; check your network and retry."},
+      "upd.zip.bad":      {"zh": "更新包无法读取（可能下载损坏）：{e}。缓存已清理，请重试；服务已尝试恢复运行。",
+                          "en": "Update package is unreadable (possibly a corrupt download): {e}. Cache cleared, please retry; the service was restarted."},
 }
 
 

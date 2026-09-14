@@ -150,28 +150,80 @@ def find_latest_release(channel):
     raise UpdateError("未找到匹配的官方发布资产（channel: %s）" % channel)
 
 
+def is_valid_zip(path):
+    """path 是否为可用的 zip（存在、可打开、条目列表可读）。
+
+    供缓存复用前校验：坏缓存必须能被识别出来，否则一次截断会让更新**永久失败**
+    （每次重试都拿同一个坏文件）。任何异常一律返回 False，绝不抛出——校验函数的
+    调用方不应因为「文件损坏」本身而崩溃。
+    """
+    try:
+        if not path or not os.path.isfile(path):
+            return False
+        with zipfile.ZipFile(path) as zf:
+            zf.infolist()   # 真正解析中央目录，能读出来才算可用
+        return True
+    except Exception:  # noqa: BLE001 - 损坏/权限/IO 一律视为不可用
+        return False
+
+
 def download(url, dest, progress=None):
-    """流式下载到 dest（先写 .part 再原子改名）。progress(done, total)。"""
+    """流式下载到 dest（先写 .part 再原子改名）。progress(done, total)。
+
+    完整性（关键）：`resp.read()` 在**连接提前断开**时返回空串，与「正常读完」
+    走同一出口。若不加校验就 os.replace，残缺文件会被转正成「已下载」并被缓存
+    复用，导致更新永久失败（实测：某次主二进制只落地 1,061,602 B / 应为
+    149,703,589 B，此后每次重试都复用该坏文件）。
+    故：
+      - Content-Length 可知 → 校验 done == total，不足即抛 UpdateError；
+      - Content-Length 不可知 → 用 is_valid_zip 兜底校验产物。
+    失败路径必须清理 .part，且绝不产出 dest。
+    """
     req = Request(url, headers={"User-Agent": USER_AGENT})
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
     tmp = dest + ".part"
-    with urlopen(req, timeout=60) as resp:
-        total = 0
+
+    def _cleanup_tmp():
         try:
-            total = int(resp.headers.get("Content-Length") or 0)
-        except (TypeError, ValueError):
+            os.remove(tmp)
+        except OSError:
+            pass
+
+    try:
+        with urlopen(req, timeout=60) as resp:
             total = 0
-        done = 0
-        with open(tmp, "wb") as fh:
-            while True:
-                chunk = resp.read(1024 * 1024)
-                if not chunk:
-                    break
-                fh.write(chunk)
-                done += len(chunk)
-                if progress and total > 0:
-                    progress(done, total)
-    os.replace(tmp, dest)
+            try:
+                total = int(resp.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                total = 0
+            done = 0
+            with open(tmp, "wb") as fh:
+                while True:
+                    chunk = resp.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    done += len(chunk)
+                    if progress and total > 0:
+                        progress(done, total)
+        # 长度可知：字节数不符即连接被截断（或服务端声明有误），不得转正
+        if total > 0 and done != total:
+            _cleanup_tmp()
+            raise UpdateError(
+                "下载不完整：%s 收到 %d / %d 字节（连接中断），已丢弃，请重试"
+                % (os.path.basename(dest), done, total))
+        # 长度不可知：退回内容校验，确保产物真是可用 zip
+        if total <= 0 and not is_valid_zip(tmp):
+            _cleanup_tmp()
+            raise UpdateError(
+                "下载内容校验失败：%s 不是有效的 zip（可能被截断），已丢弃，请重试"
+                % os.path.basename(dest))
+        os.replace(tmp, dest)
+    except UpdateError:
+        raise
+    except Exception:  # noqa: BLE001 - 任何中断都不留可被误认为成品的残留
+        _cleanup_tmp()
+        raise
     return dest
 
 
