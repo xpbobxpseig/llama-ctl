@@ -14,7 +14,6 @@ Animator 时注入；测试则可注入一个收集调用列表的假调度器�
   frame_budget_ms（默认 50ms）时，新动画直接瞬时完成，不进入调度循环。
 """
 
-from __future__ import annotations
 
 import sys
 import time
@@ -147,7 +146,6 @@ class Animator:
     frame_ms: 帧间隔毫秒（默认 16）；长驻动效建议放宽以降低主线程重绘压力。
     """
 
-    FRAME_MS = 16  # 帧间隔（约 60fps），与设计规范 after(16) 一致
 
     def __init__(self,
                  schedule: Optional[Callable[[Callable[[], None], int], Any]] = None,

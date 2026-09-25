@@ -22,7 +22,6 @@ sink 收两类东西：可读日志行（str）与状态哨兵（"__REFRESH_STAT
 import os
 import time
 
-import strings
 import updater
 from strings import fmt, t
 from updater import UpdateError

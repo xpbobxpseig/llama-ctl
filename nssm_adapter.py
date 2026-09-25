@@ -15,7 +15,6 @@ ServiceFacts（C1）：静态事实（AppDirectory / AppParameters / Start）走
 
 import re
 import subprocess
-import time
 from urllib.request import urlopen
 from urllib.error import URLError
 

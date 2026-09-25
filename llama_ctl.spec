@@ -33,7 +33,6 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,                                  # C2：关 UPX（换冷启动延迟 + AV 误报）
-    upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,

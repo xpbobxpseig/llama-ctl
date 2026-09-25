@@ -16,18 +16,15 @@ llama_ctl_gui.py — llama.cpp 服务控制台（通用版）
 import os
 import math
 import queue
-import re
-import shutil
-import subprocess
 import sys
 import threading
 import time
 import tkinter as tk
 from PIL import Image as PILImage
-from tkinter import filedialog, font as tkfont, messagebox, scrolledtext, ttk
+from tkinter import filedialog, font as tkfont, messagebox
 
 from nssm_adapter import (
-    NSSM_EXE, DEFAULT_SERVICE, get_app_parameters, set_app_parameters,
+    DEFAULT_SERVICE, get_app_parameters, set_app_parameters,
     get_start_mode, set_start_mode, sc_query_state, sc_action,
     list_nssm_services, check_health, app_directory,
 )
@@ -2088,7 +2085,6 @@ class ControlGUI(ctk.CTk):
     def _status_worker_loop(self):
         """探活 worker（daemon）：所有同步阻塞调用都在这条线程里。
         nssm.exe / sc / urlopen 卡住不会冻结主线程；结果 put 回 _status_q。"""
-        import json as _json
         while not self._stop_poll:
             try:
                 item = self._status_q.get(timeout=0.5)
