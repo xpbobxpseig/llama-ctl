@@ -9,7 +9,10 @@ $py   = Join-Path $venv 'Scripts\python.exe'
 
 if (-not (Test-Path $py)) {
     Write-Host '==> 创建 .venv'
-    py -3 -m venv $venv
+    # 固定 3.10：`py -3` 会解析到最新版（本机 3.14），该版本尚未随附本项目依赖，
+    # 会得到缺 customtkinter/PyInstaller 的构建环境。需要换版本时设 LLAMA_CTL_PY。
+    $ver = if ($env:LLAMA_CTL_PY) { $env:LLAMA_CTL_PY } else { '3.10' }
+    py "-$ver" -m venv $venv
 }
 
 Write-Host '==> 安装依赖'
