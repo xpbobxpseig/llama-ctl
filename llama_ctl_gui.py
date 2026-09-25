@@ -51,17 +51,17 @@ def _resource_dir():
 # ---------------------------------------------------------------------------
 # 配置（本机固定事实）
 # ---------------------------------------------------------------------------
-# 日志路径优先从 NSSM AppDirectory 推导（_log_path，T4 起）；
-# ERR_LOG 仅作推导失败时的回退（如 nssm 不可用或 AppDirectory 未配置）。
-ERR_LOG = r"F:\llama.cpp\server.err"
-# 预设文件路径已移入 presets.py（PRESETS_FILE）；此处经其导出的读写接口使用。
-# llama.cpp 安装目录（官方更新替换目标）：默认固定本机路径，检查时优先按
-# NSSM AppDirectory 推导（与服务实际指向保持一致）。
-LLAMA_DIR = r"F:\llama.cpp"
+# 日志路径优先从 NSSM AppDirectory 推导（_log_path）；ERR_LOG 仅作推导失败时的回退。
+# 以下路径均可用环境变量覆盖，默认值与历史行为一致：
+#   LLAMA_CTL_ERR_LOG        日志尾随回退路径
+#   LLAMA_CTL_LLAMA_DIR      llama.cpp 安装目录（官方更新替换目标回退）
+#   LLAMA_CTL_DOWNLOAD_DIR   官方资产下载缓存目录
+#   LLAMA_CTL_BACKUP_DIR     旧文件备份根目录
+ERR_LOG = os.environ.get("LLAMA_CTL_ERR_LOG") or r"F:\llama.cpp\server.err"
+LLAMA_DIR = os.environ.get("LLAMA_CTL_LLAMA_DIR") or r"F:\llama.cpp"
 LLAMA_SERVER_EXE = os.path.join(LLAMA_DIR, "llama-server.exe")
-# 官方资产下载缓存与旧文件备份根目录
-UPD_DOWNLOAD_DIR = r"F:\llama_ctl\downloads"
-UPD_BACKUP_ROOT = r"F:\llama_ctl\backup"
+UPD_DOWNLOAD_DIR = os.environ.get("LLAMA_CTL_DOWNLOAD_DIR") or r"F:\llama_ctl\downloads"
+UPD_BACKUP_ROOT = os.environ.get("LLAMA_CTL_BACKUP_DIR") or r"F:\llama_ctl\backup"
 CPU_THREADS = os.cpu_count() or 8
 
 # ---------------------------------------------------------------------------

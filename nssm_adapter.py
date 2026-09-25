@@ -13,6 +13,7 @@ ServiceFacts（C1）：静态事实（AppDirectory / AppParameters / Start）走
 本机固定事实：NSSM 路径与默认服务名。
 """
 
+import os
 import re
 import subprocess
 from urllib.request import urlopen
@@ -24,10 +25,12 @@ except ImportError:  # 非 Windows：注册表直读不可用，一律回退 nss
     winreg = None
 
 # ---------------------------------------------------------------------------
-# 本机固定事实
+# 本机环境（可用环境变量覆盖；默认值与历史行为一致）
 # ---------------------------------------------------------------------------
-NSSM_EXE = r"F:\llama.cpp\nssm\nssm-2.24\win64\nssm.exe"
-DEFAULT_SERVICE = "QwenLLM"
+# LLAMA_CTL_NSSM_EXE：nssm.exe 绝对路径；也可把 nssm 放进 PATH。
+NSSM_EXE = os.environ.get("LLAMA_CTL_NSSM_EXE") or r"F:\llama.cpp\nssm\nssm-2.24\win64\nssm.exe"
+# LLAMA_CTL_SERVICE：默认服务名（顶部下拉初始选中项）
+DEFAULT_SERVICE = os.environ.get("LLAMA_CTL_SERVICE") or "QwenLLM"
 
 
 def _run(cmd, timeout=15):

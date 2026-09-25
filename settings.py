@@ -10,7 +10,8 @@ settings.py — 工具偏好持久化（llama_ctl）
 import json
 import os
 
-SETTINGS_FILE = r"F:\llama_ctl\settings.json"
+# 可用环境变量 LLAMA_CTL_SETTINGS 覆盖；默认保持本机固定路径。
+SETTINGS_FILE = os.environ.get("LLAMA_CTL_SETTINGS") or r"F:\llama_ctl\settings.json"
 
 DEFAULTS = {
     "language": "zh",        # "zh" | "en"

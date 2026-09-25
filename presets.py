@@ -9,9 +9,10 @@ import json
 import os
 
 # 预设文件：存命名参数组合（含全部字段 values），独立于具体服务。
-# 统一固定到 F:\llama_ctl\presets.json：exe 在 dist\ 下运行也读写同一份，
+# 路径可用环境变量 LLAMA_CTL_PRESETS 覆盖（便于跨机器部署）；
+# 默认保持本机固定路径，exe 在 dist\ 下运行也读写同一份，
 # 避免「exe 换目录/升级后预设丢失」与双副本分裂。
-PRESETS_FILE = r"F:\llama_ctl\presets.json"
+PRESETS_FILE = os.environ.get("LLAMA_CTL_PRESETS") or r"F:\llama_ctl\presets.json"
 
 
 def load_presets():
