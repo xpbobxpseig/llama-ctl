@@ -418,3 +418,27 @@ def test_registry_shape_is_start_and_duration_only(env):
     start, duration = a._active[aid]
     assert start == 0.0 and duration == 100.0
 
+
+
+def test_animate_frame_ms_override_uses_per_anim_interval(env):
+    """契约：animate(frame_ms=N) 覆盖本段帧间隔，不污染实例默认与注册表形状。"""
+    q, clock, a = env
+    a.frame_ms = 66
+    a.animate(lambda p: None, 100, frame_ms=16)
+    assert q[0][1] == 16, "首帧用覆盖间隔"
+    assert a._active[1] == (0.0, 100.0), "注册表保持 (start, duration) 二元组"
+    a.animate(lambda p: None, 100)
+    assert q[1][1] == 66, "未覆盖时回落到实例 frame_ms"
+
+
+def test_frame_ms_override_cleaned_up_on_cancel_all(env):
+    """取消后逐动画帧间隔状态不得残留。"""
+    _q, _clock, a = env
+    a.animate(lambda p: None, 100, frame_ms=16)
+    a.animate(lambda p: None, 100, frame_ms=33)
+    assert len(a._frames) == 2
+    a.cancel_all()
+    assert not a._active and not a._hooks and not a._frames
+    aid = a.animate(lambda p: None, 100, frame_ms=16)
+    assert a.cancel(aid) is True
+    assert not a._frames

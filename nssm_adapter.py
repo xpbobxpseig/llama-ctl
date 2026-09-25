@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-nssm_adapter.py — 服务控制与探测 adapter（llama_ctl）
+nssm_adapter.py — 服务事实与控制 adapter（llama_ctl）
 
-把本机 NSSM / Windows sc / powershell / HTTP 探活收拢为一个 deep module，
+把本机 NSSM / 注册表 / Windows sc / powershell / HTTP 探活收拢为一个 deep module，
 GUI 层只依赖这里的函数 interface；测试可用 monkeypatch 替换任意函数。
+
+ServiceFacts（C1）：静态事实（AppDirectory / AppParameters / Start）走注册表直读
+（0 次 spawn，微秒级），按服务名缓存快照；写回后 invalidate 该服务。未配置 /
+注册表不可读时回退 nssm get。
 
 本机固定事实：NSSM 路径与默认服务名。
 """
 
 import re
 import subprocess
+import time
 from urllib.request import urlopen
 from urllib.error import URLError
+
+try:
+    import winreg
+except ImportError:  # 非 Windows：注册表直读不可用，一律回退 nssm get
+    winreg = None
 
 # ---------------------------------------------------------------------------
 # 本机固定事实
@@ -27,6 +37,8 @@ def _run(cmd, timeout=15):
     NSSM 输出为 UTF-16LE（每字符后带 \\x00）；sc 等系统命令为本地代码页（GBK）。
     按字节特征自动解码。
     """
+    global _spawn_count
+    _spawn_count += 1
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=timeout,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -63,25 +75,86 @@ def nssm_set(service, param, value, sub=None):
     return rc == 0, out
 
 
-def get_app_parameters(service):
-    return nssm_get(service, "AppParameters") or ""
+# ---------------------------------------------------------------------------
+# ServiceFacts（C1）：静态事实 = 注册表直读 + 按服务缓存
+# ---------------------------------------------------------------------------
+# 注册表位置：服务键下的 Parameters 子键存 AppDirectory / AppParameters /
+# Application；Start（DWORD）在服务键本身。
+_SVC_KEY = r"SYSTEM\CurrentControlSet\Services\%s"
+_PARAMS_KEY = _SVC_KEY + r"\Parameters"
+
+# 静态事实缓存：service -> {"app_dir","app_params","start"}。
+# 读侧微秒级且无 spawn；写侧（nssm set）后按 key invalidate。
+_facts_cache = {}
+
+# _run 每次真实 spawn 计数（只增不减）。测试用于断言空闲主线程 spawn=0/s。
+_spawn_count = 0
 
 
-def set_app_parameters(service, text):
-    return nssm_set(service, "AppParameters", text)
+def _read_facts_registry(service):
+    """注册表直读静态事实；键/值缺失或不可读时返回 None（不回退）。"""
+    if winreg is None:
+        return None
+    out = {"app_dir": None, "app_params": None, "start": None}
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _PARAMS_KEY % service) as k:
+            out["app_dir"] = winreg.QueryValueEx(k, "AppDirectory")[0] or None
+            out["app_params"] = winreg.QueryValueEx(k, "AppParameters")[0]
+    except OSError:
+        return None  # 服务不存在 / 无 Parameters 子键：交由调用方回退
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _SVC_KEY % service) as k:
+            out["start"] = winreg.QueryValueEx(k, "Start")[0]
+    except OSError:
+        pass
+    return out
 
 
-def app_directory(service):
-    """返回服务的 AppDirectory，供 GUI 推导日志路径（取代硬编码）。
+# 注入点：测试替换为内存 fake，无需管理员权限 / 本机真存在该服务。
+_reader = _read_facts_registry
 
-    未配置（None / 空串）时返回 None。
+
+def facts(service, refresh=False):
+    """返回服务的静态事实 dict（AppDirectory / AppParameters / Start）。
+
+    首次或 refresh=True 时经注册表直读（0 spawn）；注册表不可用则回退 nssm get
+    （每次一个进程，但仍进缓存）。命中缓存时不 spawn、不读注册表。
     """
-    val = nssm_get(service, "AppDirectory")
-    return val if val else None
+    if not refresh and service in _facts_cache:
+        return _facts_cache[service]
+    reg = _reader(service)
+    if reg is None:
+        # 回退：非 NSSM 服务 / 权限不足 / 非 Windows
+        snap = {
+            "app_dir": nssm_get(service, "AppDirectory") or None,
+            "app_params": nssm_get(service, "AppParameters") or "",
+            "start": _start_from_nssm(nssm_get(service, "Start")),
+        }
+    else:
+        snap = {
+            "app_dir": reg["app_dir"],
+            "app_params": reg["app_params"] or "",
+            "start": _start_label(reg["start"]),
+        }
+    _facts_cache[service] = snap
+    return snap
 
 
-def get_start_mode(service):
-    raw = nssm_get(service, "Start")
+def invalidate(service=None):
+    """写回成功后失效缓存：service 为 None 时清空全部。"""
+    if service is None:
+        _facts_cache.clear()
+    else:
+        _facts_cache.pop(service, None)
+
+
+def _start_label(raw):
+    """注册表 Start(DWORD) → auto/manual/disabled；未知值回退 manual。"""
+    return {2: "auto", 3: "manual", 4: "disabled"}.get(raw, "manual")
+
+
+def _start_from_nssm(raw):
+    """nssm get Start 文本（SERVICE_AUTO_START 等）→ auto/manual/disabled。"""
     if raw is None:
         return None
     if "AUTO" in raw:
@@ -93,6 +166,31 @@ def get_start_mode(service):
     return "manual"
 
 
+def get_app_parameters(service):
+    """服务当前 AppParameters 文本（注册表直读，命中缓存不 spawn）。"""
+    return facts(service)["app_params"]
+
+
+def set_app_parameters(service, text):
+    ok, out = nssm_set(service, "AppParameters", text)
+    if ok:
+        invalidate(service)  # 写后失效：下次读回注册表，与 nssm 规范化结果一致
+    return ok, out
+
+
+def app_directory(service):
+    """返回服务的 AppDirectory，供 GUI 推导日志路径（取代硬编码）。
+
+    未配置（None / 空串）时返回 None。
+    """
+    return facts(service)["app_dir"]
+
+
+def get_start_mode(service):
+    """服务启动模式：auto / manual / disabled（注册表 Start 直读）。"""
+    return facts(service)["start"]
+
+
 # NSSM set Start 仅接受这些完整大写枚举值
 _NSSM_START_MAP = {
     "auto": "SERVICE_AUTO_START",
@@ -102,7 +200,10 @@ _NSSM_START_MAP = {
 
 
 def set_start_mode(service, mode):
-    return nssm_set(service, "Start", _NSSM_START_MAP.get(mode, mode))
+    ok, out = nssm_set(service, "Start", _NSSM_START_MAP.get(mode, mode))
+    if ok:
+        invalidate(service)
+    return ok, out
 
 
 def sc_query_state(service):

@@ -14,7 +14,6 @@ llama_ctl_gui.py — llama.cpp 服务控制台（通用版）
 """
 
 import os
-import json
 import math
 import queue
 import re
@@ -34,10 +33,11 @@ from nssm_adapter import (
 )
 from params import parse_params, build_params, semantically_equal
 from settings import load_settings, save_settings
+from presets import load_presets, save_presets
 from motion import Animator, format_hex, lerp, parse_hex, ease_out_cubic, ease_in_cubic
 import strings
 import updater
-from updater import UpdateError
+import installer
 from strings import t, fmt
 
 
@@ -57,10 +57,7 @@ def _resource_dir():
 # 日志路径优先从 NSSM AppDirectory 推导（_log_path，T4 起）；
 # ERR_LOG 仅作推导失败时的回退（如 nssm 不可用或 AppDirectory 未配置）。
 ERR_LOG = r"F:\llama.cpp\server.err"
-# 预设文件：存命名参数组合（含全部字段 values），独立于具体服务。
-# 统一固定到 F:\llama_ctl\presets.json：exe 在 dist\ 下运行也读写同一份，
-# 避免「exe 换目录/升级后预设丢失」与双副本分裂。
-PRESETS_FILE = r"F:\llama_ctl\presets.json"
+# 预设文件路径已移入 presets.py（PRESETS_FILE）；此处经其导出的读写接口使用。
 # llama.cpp 安装目录（官方更新替换目标）：默认固定本机路径，检查时优先按
 # NSSM AppDirectory 推导（与服务实际指向保持一致）。
 LLAMA_DIR = r"F:\llama.cpp"
@@ -414,33 +411,9 @@ for _f in FIELDS:
 
 
 
-# 预设（命名参数组合，本地 JSON）
-# ---------------------------------------------------------------------------
-def load_presets():
-    """读取预设字典 {name: {key: value}}。文件不存在/损坏返回空字典。"""
-    try:
-        with open(PRESETS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-    except FileNotFoundError:
-        return {}
-    except Exception:  # noqa: BLE001
-        return {}
-    return {}
-
-
-def save_presets(presets):
-    """写回预设字典到 PRESETS_FILE（原子写：先临时文件再替换）。"""
-    tmp = PRESETS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(presets, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, PRESETS_FILE)
-
 
 # ---------------------------------------------------------------------------
-# 预设（命名参数组合，本地 JSON）
-# ---------------------------------------------------------------------------
+# GUI（CustomTkinter）
 # ---------------------------------------------------------------------------
 # GUI（CustomTkinter）
 # ---------------------------------------------------------------------------
@@ -481,6 +454,29 @@ def _apply_palette(mode):
 
 _apply_palette("light")
 
+
+def _set_appearance(mode):
+    """设置 CTk 外观并同步展开调色板（system 解析为实际明暗）。
+
+    返回生效外观名（"light"/"dark"）；C_* 与 _appearance 均以此为单一事实源，
+    避免启动与 _restart_ui 各写一套解析逻辑导致反相。
+    """
+    ctk.set_appearance_mode(
+        {"system": "system", "light": "light", "dark": "dark"}.get(mode, "system"))
+    # CTk 的 set_appearance_mode("system") 只登记模式，真正的重新检测要等 30ms
+    # 轮询（AppearanceModeTracker.update）；紧接着读 get_appearance_mode() 会拿到
+    # 上一次手动值，使调色板与 CTk 原生控件反相（主界面停在 light、菜单已翻
+    # dark）。这里同步强制一次检测，让两侧立刻一致。显式 light/dark 下该调用
+    # 因 appearance_mode_set_by=="user" 为无操作。
+    try:
+        ctk.AppearanceModeTracker.init_appearance_mode()
+    except Exception:  # noqa: BLE001 - 私有 API 缺失时退回轮询时序
+        pass
+    resolved = "dark" if ctk.get_appearance_mode().lower() == "dark" else "light"
+    _apply_palette(resolved)
+    return resolved
+
+
 F_BODY = ("Microsoft YaHei UI", 13)
 F_SMALL = ("Microsoft YaHei UI", 12)
 F_TITLE = ("Microsoft YaHei UI", 18, "bold")
@@ -499,39 +495,33 @@ class _HelpTip:
     """
 
     _TAU = 0.2           # 指数渐隐时间常数（P3：2s→0.8s）：0.8s 末 α=exp(-0.8/0.2)≈0.018
-    _FADE_MS = 16        # 淡入/渐隐帧间隔
+    _FADE_MS = 16        # 淡入/渐隐帧间隔（覆盖 Animator 默认帧间隔）
     _FADE_IN_MS = 200    # 淡入时长
+    _FADE_OUT_MS = 800   # 渐隐时长（k=1 时 α 到 0.05 约需 τ·ln20≈600ms，留足阶梯余量）
     _active = None       # 当前唯一活动提示实例（全局互斥）
     _hovering = None     # 最近进入悬停的实例（后悬停者优先）
 
-    def __init__(self, widget, text_fn, motion_on=None):
+    def __init__(self, widget, text_fn, motion_on=None, anim=None):
         self.widget = widget
         self.text_fn = text_fn          # 延迟取值，内容始终最新
         self.motion_on = motion_on if motion_on is not None else (lambda: True)
+        # 动效引擎：默认用控件 after 自建（保持独立可测）；GUI 传入共享实例
+        self.anim = anim if anim is not None else Animator(
+            schedule=lambda fn, ms: widget.after(ms, fn), frame_ms=_HelpTip._FADE_MS)
         self.win = None
         self._after_id = None           # 延迟显示计时器 token（300ms 防误触）
-        self._frame = None              # 淡入/渐隐帧 after token（帧链）
-        self._t0 = 0.0                  # 当前帧链起点（墙钟）
+        self._anim_id = -1              # 当前淡入/渐隐动画 id（-1 = 无）
         self._alpha = 1.0               # 最近写入的窗口 alpha
         self._stage = 0                 # 末段阶梯：0 自然衰减 / 1 定格 0.05 / 2 定格 0.02
         widget.bind("<Enter>", self._enter)
         widget.bind("<Leave>", self._leave)
         widget.bind("<Button-1>", self._hide)   # 万一点击也立即收起
 
-    # ---- 帧链工具 ----
-
     def _cancel_frame(self):
-        """取消在途淡入/渐隐帧（若有）。控件销毁后 after_cancel 会 TclError，吞掉。"""
-        if self._frame is not None:
-            try:
-                self.widget.after_cancel(self._frame)
-            except Exception:  # noqa: BLE001 - 控件销毁后 token 已失效
-                pass
-            self._frame = None
-
-    def _schedule(self, fn, ms):
-        """调度一帧并把 token 存 _frame（下一帧/取消时用）。"""
-        self._frame = self.widget.after(ms, fn)
+        """取消在途淡入/渐隐动画（若有）。控件销毁后取消是纯注册表操作，无 TclError。"""
+        if self._anim_id > 0:
+            self.anim.cancel(self._anim_id)
+            self._anim_id = -1
 
     def _destroy_win(self):
         """销毁提示窗并清理全部计时器/帧链与互斥状态（收尾/互斥/点击共用）。"""
@@ -595,8 +585,11 @@ class _HelpTip:
         except Exception:  # noqa: BLE001 - 读不到 alpha 按全显处理
             self._alpha = 1.0
         self._stage = 0
-        self._t0 = time.monotonic()
-        self._schedule(self._fade_frame, _HelpTip._FADE_MS)
+        self._anim_id = self.anim.animate(
+            self._fade_out_cb, _HelpTip._FADE_OUT_MS,
+            on_done=self._fade_out_done, frame_ms=_HelpTip._FADE_MS)
+        if self._anim_id <= 0:  # 瞬时/降级：直接销毁
+            self._destroy_win()
 
     # ---- 显示 / 渐隐帧 ----
 
@@ -631,46 +624,48 @@ class _HelpTip:
             if self.motion_on():
                 self._alpha = 0.0
                 win.attributes("-alpha", 0.0)
-                self._t0 = time.monotonic()
-                self._schedule(self._fade_in_frame, _HelpTip._FADE_MS)
+                self._anim_id = self.anim.animate(
+                    self._fade_in_cb, _HelpTip._FADE_IN_MS,
+                    on_done=self._fade_in_done, frame_ms=_HelpTip._FADE_MS)
+                if self._anim_id <= 0:  # 瞬时/降级：直接显示
+                    win.attributes("-alpha", 1.0)
+                    self._alpha = 1.0
             else:
                 win.attributes("-alpha", 1.0)  # 动效关：瞬时显示
                 self._alpha = 1.0
         except Exception:  # noqa: BLE001 - 定时器晚到且控件已销毁（UI 重建）时静默放弃
             pass
 
-    def _fade_in_frame(self):
-        """淡入帧：200ms ease-out，α 0→1。"""
+    def _fade_in_cb(self, p):
+        """淡入帧：200ms ease-out，α 0→1（p 为线性进度，ease 在回调内做）。"""
+        win = self.win
+        if win is None:
+            return
         try:
-            self._frame = None
-            win = self.win
-            if win is None:
-                return
-            if not win.winfo_exists():
-                self.win = None
-                if _HelpTip._active is self:
-                    _HelpTip._active = None
-                return
-            t = (time.monotonic() - self._t0) * 1000.0 / _HelpTip._FADE_IN_MS
-            if t >= 1.0:
-                win.attributes("-alpha", 1.0)
-                self._alpha = 1.0
-                return
-            a = ease_out_cubic(t, 1.0)
+            a = ease_out_cubic(p, 1.0)
             win.attributes("-alpha", max(0.0, a))
             self._alpha = a
-            self._schedule(self._fade_in_frame, _HelpTip._FADE_MS)
         except Exception:  # noqa: BLE001 - 销毁竞态下的 TclError 等吞掉
-            self._frame = None
+            pass
 
-    def _fade_frame(self):
-        """渐隐帧：α=exp(-k·t/τ)；k 随光标离问号距离加速（加分 1），
-        末段 α 按 0.05/0.02 阶梯定格后销毁（加分 2）。"""
+    def _fade_in_done(self):
+        self._anim_id = -1
+        win = self.win
+        if win is None:
+            return
         try:
-            self._frame = None
-            win = self.win
-            if win is None:
-                return
+            win.attributes("-alpha", 1.0)
+            self._alpha = 1.0
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _fade_out_cb(self, p):
+        """渐隐帧：α=exp(-k·t/τ)；k 随光标离问号距离加速（加分 1），
+        末段 α 按 0.05/0.02 阶梯定格后销毁（加分 2）。t = p × 渐隐时长。"""
+        win = self.win
+        if win is None:
+            return
+        try:
             if not win.winfo_exists():
                 self.win = None
                 if _HelpTip._active is self:
@@ -682,7 +677,8 @@ class _HelpTip:
             py = win.winfo_pointery() - (self.widget.winfo_rooty()
                                          + self.widget.winfo_height() // 2)
             k = 1.0 + min(max(abs(px), abs(py)) / 400.0, 1.0)
-            a = math.exp(-(time.monotonic() - self._t0) * k / _HelpTip._TAU)
+            t = p * _HelpTip._FADE_OUT_MS / 1000.0
+            a = math.exp(-t * k / _HelpTip._TAU)
             # 加分 2：末段阶梯化（0.05 / 0.02 / 0），避免低 alpha 闪烁
             if a < 0.05:
                 if self._stage == 0:
@@ -694,9 +690,14 @@ class _HelpTip:
                     return
             win.attributes("-alpha", max(0.0, a))
             self._alpha = a
-            self._schedule(self._fade_frame, _HelpTip._FADE_MS)
         except Exception:  # noqa: BLE001 - 销毁竞态下的 TclError 等吞掉
-            self._frame = None
+            pass
+
+    def _fade_out_done(self):
+        """渐隐时长耗尽仍未触发阶梯销毁：兜底销毁（k≥1 时通常已提前销毁）。"""
+        self._anim_id = -1
+        if self.win is not None:
+            self._destroy_win()
 
     def _hide(self, _=None):
         """点击立即收起（清理帧链与互斥状态，同收尾路径）。"""
@@ -712,10 +713,7 @@ class ControlGUI(ctk.CTk):
             return
         self.settings = load_settings()
         strings.set_lang(self.settings["language"])
-        _apply_palette("light" if self.settings["appearance"] == "dark" else
-                       ({"light": "light", "dark": "dark"}.get(self.settings["appearance"], "light")))
-        ctk.set_appearance_mode(
-            {"system": "system", "light": "light", "dark": "dark"}[self.settings["appearance"]])
+        _set_appearance(self.settings["appearance"])
         self.title(t("app.title"))
         try:
             self.iconbitmap(os.path.join(_resource_dir(), "llama_icon.ico"))
@@ -755,9 +753,6 @@ class ControlGUI(ctk.CTk):
         # D7 字段改动高亮：每字段恢复色 after token；_suppress_trace 屏蔽程序化填值
         self._field_flash_after = {}  # key -> after token（快速连改重置计时器）
         self._suppress_trace = False  # load_params/预设载入等程序化 set 期间屏蔽 trace
-        # F1 按钮渐隐帧 token 注册表 btn -> after token（手写 after 链，不走
-        # Animator；每帧执行前先摘除自身，关窗/重建时统一取消在途帧）
-        self._hover_fades = {}
         # D8 折叠分组：展开状态（_restart_ui 重建后保留，默认展开前两组）
         self.group_open = {}
         self._log_off = 0  # _poll_log 增量渲染：上次读到的文件偏移
@@ -817,9 +812,9 @@ class ControlGUI(ctk.CTk):
         if kind == "primary":
             base, hover = C_ACC, C_ACCH
         elif kind == "danger":
-            base, hover = C_RED, "#fdeceb"
+            base, hover = C_RED, format_hex(lerp(C_RED, C_CARD, 0.85))
         else:
-            base, hover = C_TXT, C_CARD
+            base, hover = C_TXT, C_BG
         # hover=False：禁用 CTkButton 原生 hover 状态机（其 _on_enter/_on_leave
         # 用 canvas.itemconfig 直接画 inner_parts，绕过 fg_color——与我们的
         # 16ms 动画帧交替重绘会深/浅爆闪）。视觉完全由 _fade_enter/_fade_leave
@@ -843,17 +838,14 @@ class ControlGUI(ctk.CTk):
         btn.configure(width=max(88, _tw + 2 * 14 + 2))
 
         # hover 动效状态（闭包）：
-        #   aid  进入/续插 tween 的 Animator id（-1 = 无）
-        #   cur  我们最近写入的可插值颜色。关键点：Tk 事件按注册序执行，CTk 内部
-        #        <Enter>/<Leave> 先于本 handler 把 fg_color 复位，因此不能读 cget
-        #        取起点——必须用闭包记住自己写的颜色
-        #   fade 在途渐隐帧的 after token（None = 无）；每帧自替换，token 同步
-        #        登记进 self._hover_fades，供关窗/_restart_ui 统一取消
-        hstate = {"aid": -1, "cur": None, "fade": None}
+        #   aid  当前动画 id（进入 tween / 渐隐 / 定格段共用一个槽；-1 = 无）
+        hstate = {"aid": -1, "cur": None}
         _FADE_TAU = 0.27   # 指数渐隐时间常数（P3：2s→0.8s）：0.8s 末 α=exp(-0.8/0.27)≈0.052
         _FADE_STOP = 0.05  # α 降到该值 → 定格 _FADE_HOLD 毫秒后直跳终态
         _FADE_HOLD = 80    # 末帧定格时长（ms，生动加分 2）
-        _FADE_FRAME = 16   # 渐隐帧间隔（ms）
+        _FADE_FRAME = 16   # 渐隐帧间隔（ms，覆盖 Animator 默认）
+        # 指数衰减时长：α 从 1 降到 _FADE_STOP 所需时间 t = τ·ln(1/STOP)
+        _FADE_DUR = int(round(-_FADE_TAU * 1000.0 * math.log(_FADE_STOP)))
 
         def _resolve_base():
             """transparent 基色按祖先链解析出真实底色（ghost/danger 落在卡片/行上）。
@@ -871,22 +863,15 @@ class ControlGUI(ctk.CTk):
                 p = getattr(p, "master", None)
             return C_CARD
 
-        def _fade_cancel():
-            """取消本按钮在途渐隐帧（若有），并从注册表摘除 token。"""
-            tok = self._hover_fades.pop(btn, None)
-            if tok is not None:
-                try:
-                    self.after_cancel(tok)
-                except Exception:  # noqa: BLE001 - token 已执行/已清理
-                    pass
-            hstate["fade"] = None
+        def _cancel_aid():
+            """取消本按钮在途动画（进入 tween / 渐隐 / 定格段，若有）。"""
+            if hstate["aid"] > 0:
+                self.anim.cancel(hstate["aid"])
+            hstate["aid"] = -1
 
         def _fade_enter(hover_col):
             """进入 / 渐隐期移回：取消在途渐隐，从当前色续插回高亮（100ms ease-out）。"""
-            _fade_cancel()
-            if hstate["aid"] > 0:
-                self.anim.cancel(hstate["aid"])
-                hstate["aid"] = -1
+            _cancel_aid()
             if btn.cget("state") == "disabled":
                 return  # t5 联动置灰时不动外观
             if hstate["cur"] is None:
@@ -898,33 +883,37 @@ class ControlGUI(ctk.CTk):
                 return
 
             def _tick(p):
-                if btn.cget("state") == "disabled":
-                    return  # 中途被置灰（如 t5 轮询）：停止写色，保住禁用外观
-                col = format_hex(lerp(start, hover_col, ease_out_cubic(p, 1)))
-                hstate["cur"] = col
-                btn.configure(fg_color=col)
+                try:
+                    if btn.cget("state") == "disabled":
+                        return  # 中途被置灰（如 t5 轮询）：停止写色，保住禁用外观
+                    col = format_hex(lerp(start, hover_col, ease_out_cubic(p, 1)))
+                    hstate["cur"] = col
+                    btn.configure(fg_color=col)
+                except Exception:  # noqa: BLE001 - 销毁竞态吞掉
+                    pass
 
             def _done():
                 hstate["aid"] = -1
-                if btn.cget("state") == "disabled":
+                try:
+                    if btn.cget("state") == "disabled":
+                        return
+                except Exception:  # noqa: BLE001
                     return
                 hstate["cur"] = hover_col
 
-            hstate["aid"] = self.anim.animate(_tick, 100, on_done=_done)
+            hstate["aid"] = self.anim.animate(_tick, 100, on_done=_done,
+                                              frame_ms=_FADE_FRAME)
             if hstate["aid"] <= 0:  # 瞬时/降级：on_done 已同步执行
                 hstate["aid"] = -1
 
         def _fade_leave(final_col, back_to_transparent=False):
-            """移出：0.8s 指数渐隐 高亮→终态（手写 after 帧链，不用 Animator）。
+            """移出：指数渐隐 高亮→终态（Animator 驱动，帧间隔 16ms）。
 
-            每帧 α = exp(-t/τ)，t 取墙钟（time.monotonic，窗口卡顿时自然掉帧
-            不拖长）；颜色 = lerp(终态, 高亮, α)。终态色先按亮度压 2%
-            （生动加分 1：消退更真实），α≤0.05 时定格 80ms 再直跳终态。
+            每帧 α = exp(-t/τ)（t = p·_FADE_DUR），颜色 = lerp(终态, 高亮, α)。
+            终态色先按亮度压 2%（生动加分 1：消退更真实），α≤0.05 时定格
+            _FADE_HOLD 毫秒再直跳终态。
             """
-            _fade_cancel()
-            if hstate["aid"] > 0:
-                self.anim.cancel(hstate["aid"])
-                hstate["aid"] = -1
+            _cancel_aid()
             if btn.cget("state") == "disabled":
                 return  # t5 联动置灰时不动外观
             if hstate["cur"] is None:
@@ -934,8 +923,6 @@ class ControlGUI(ctk.CTk):
             if not self._motion_on():
                 btn.configure(fg_color="transparent" if back_to_transparent
                               else final_col)
-                return
-            if btn.cget("state") == "disabled":
                 return
 
             # 终态色亮度轻压 2%（浅色向黑、深色向白偏移）
@@ -948,47 +935,9 @@ class ControlGUI(ctk.CTk):
             anchor = (0, 0, 0) if lum > 128 else (255, 255, 255)
             target = format_hex(lerp(base_col, anchor, 0.02))
 
-            t0 = time.monotonic()
-
-            def _schedule_frame(fn, ms):
-                """调度一帧并登记 token（hstate + 注册表）；帧执行时先摘除自身。"""
-                box = {}
-
-                def _run():
-                    self._hover_fades.pop(btn, None)
-                    hstate["fade"] = None
-                    fn()
-
-                box["tok"] = self.after(ms, _run)
-                self._hover_fades[btn] = box["tok"]
-                hstate["fade"] = box["tok"]
-
-            def _frame():
+            def _finish():
+                hstate["aid"] = -1
                 try:
-                    if not btn.winfo_exists():
-                        return  # 按钮已随 _restart_ui 销毁：帧链自灭
-                    if btn.cget("state") == "disabled":
-                        # 中途被置灰（如 t5 轮询）：停在当前帧色，保住禁用外观
-                        hstate["cur"] = None
-                        return
-                    a = math.exp(-(time.monotonic() - t0) / _FADE_TAU)
-                    if a <= _FADE_STOP:
-                        # 末帧定格 80ms 再直跳终态（生动加分 2）
-                        _schedule_frame(lambda: _fade_finish(final_col),
-                                        _FADE_HOLD)
-                        return
-                    col = format_hex(lerp(target, peak, a))
-                    hstate["cur"] = col
-                    btn.configure(fg_color=col)
-                    _schedule_frame(_frame, _FADE_FRAME)
-                except Exception:  # noqa: BLE001 - 销毁竞态下的 TclError 等吞掉
-                    self._hover_fades.pop(btn, None)
-                    hstate["fade"] = None
-
-            def _fade_finish(final):
-                try:
-                    if not btn.winfo_exists():
-                        return
                     if btn.cget("state") == "disabled":
                         hstate["cur"] = None
                         return
@@ -996,13 +945,43 @@ class ControlGUI(ctk.CTk):
                         btn.configure(fg_color="transparent")
                         hstate["cur"] = _resolve_base()
                     else:
-                        btn.configure(fg_color=final)
-                        hstate["cur"] = final
-                except Exception:  # noqa: BLE001
-                    self._hover_fades.pop(btn, None)
-                    hstate["fade"] = None
+                        btn.configure(fg_color=final_col)
+                        hstate["cur"] = final_col
+                except Exception:  # noqa: BLE001 - 销毁竞态吞掉
+                    pass
 
-            _schedule_frame(_frame, _FADE_FRAME)
+            def _tick(p):
+                try:
+                    if btn.cget("state") == "disabled":
+                        return  # 中途被置灰：停在当前色，保住禁用外观
+                    a = math.exp(-(p * _FADE_DUR / 1000.0) / _FADE_TAU)
+                    col = format_hex(lerp(target, peak, a))
+                    hstate["cur"] = col
+                    btn.configure(fg_color=col)
+                except Exception:  # noqa: BLE001 - 销毁竞态吞掉
+                    pass
+
+            def _hold_start():
+                # 末帧定格 _FADE_HOLD 再直跳终态（生动加分 2）
+                froze = format_hex(lerp(target, peak, _FADE_STOP))
+
+                def _hold(_p):
+                    try:
+                        if btn.cget("state") == "disabled":
+                            return
+                        btn.configure(fg_color=froze)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                hstate["aid"] = self.anim.animate(_hold, _FADE_HOLD, on_done=_finish,
+                                                  frame_ms=_FADE_FRAME)
+                if hstate["aid"] <= 0:  # 瞬时/降级：直接收尾
+                    _finish()
+
+            hstate["aid"] = self.anim.animate(_tick, _FADE_DUR, on_done=_hold_start,
+                                              frame_ms=_FADE_FRAME)
+            if hstate["aid"] <= 0:  # 瞬时/降级：直接收尾
+                _finish()
 
         btn.bind("<Enter>", lambda e: _fade_enter(hover))
         # 离开：primary 回 C_ACC；ghost/danger 回 transparent（终态按祖先底色插值）
@@ -1025,6 +1004,18 @@ class ControlGUI(ctk.CTk):
         return inner
 
     # ---- 布局 ----
+    def _first_paint_services(self):
+        """首帧下拉值：用上次枚举结果（settings["services"]），无则只放当前服务。
+
+        #3 启动骨架：绝不在首帧同步调用 list_nssm_services()（PowerShell
+        Get-CimInstance 实测 ~646ms，会卡住第一次绘制）。真实枚举交给
+        _status_worker，结果回灌后刷新下拉（见 _drain_status）。
+        """
+        cached = [s for s in self.settings.get("services", []) if isinstance(s, str)]
+        if self.service in cached:
+            return cached
+        return [self.service] + cached
+
     def _build_widgets(self):
         # 头部：标题 + 服务选择
         head = ctk.CTkFrame(self, fg_color="transparent")
@@ -1036,7 +1027,7 @@ class ControlGUI(ctk.CTk):
         ctk.CTkLabel(svc, text=t("svc.label"), font=F_BODY, text_color=C_MUT).pack(side="left", padx=(0, 6))
         self.service_var = tk.StringVar(value=self.service)
         self.cmb_service = ctk.CTkOptionMenu(svc, variable=self.service_var,
-                                             values=list_nssm_services(),
+                                             values=self._first_paint_services(),
                                              width=220, font=F_BODY,
                                              fg_color=C_CARD, button_color=C_BORDER,
                                              button_hover_color=C_ACC,
@@ -1128,7 +1119,7 @@ class ControlGUI(ctk.CTk):
                      anchor="w").pack(side="left")
         self.scroll = ctk.CTkScrollableFrame(pc, fg_color="transparent",
                                              scrollbar_button_color=C_GRAY,
-                                             scrollbar_button_hover_color=C_GRAY)
+                                             scrollbar_button_hover_color=C_MUT)
         self.scroll.pack(fill="both", expand=True)
         self.scroll.grid_columnconfigure(2, weight=1)
         # D8 折叠分组：每个 group 一个可折叠区（头按钮 + 独立 grid 容器，行号各从 0 计）
@@ -1147,7 +1138,7 @@ class ControlGUI(ctk.CTk):
             head = ctk.CTkButton(
                 self.scroll, text=self._group_label(g), font=F_GROUP,
                 text_color=C_ACC if self.group_open[g] else C_MUT,
-                fg_color="transparent", hover_color=C_CARD,
+                fg_color="transparent", hover_color=C_BG,
                 anchor="w", height=30, corner_radius=6,
                 command=lambda gg=g: self._toggle_group(gg))
             head.grid(row=len(self._group_containers) * 2, column=0,
@@ -1189,10 +1180,12 @@ class ControlGUI(ctk.CTk):
         self.btn_log_toggle.pack(side="left")
         self.txt_log = ctk.CTkTextbox(lg, height=40, font=("Consolas", 11),
                                       fg_color=C_FIELD, border_width=1,
-                                      border_color=C_BORDER, wrap="none")
+                                      border_color=C_BORDER, text_color=C_TXT,
+                                      wrap="none")
         self.txt_log.configure(state="disabled")
         # 新行渐隐高亮 tag（D5）：插入后 ≤200ms 移除背景
-        self.txt_log._textbox.tag_configure("flash", background="#fff3cd")
+        self.txt_log._textbox.tag_configure(
+            "flash", background=format_hex(lerp(C_FIELD, C_ORG, 0.30)))
         # 默认不打包日志区，仅头部行
         # 警告行（解析告警）挂在日志折叠条下方
         self.lbl_warn = ctk.CTkLabel(self, text="", font=F_SMALL, text_color=C_ORG,
@@ -1228,10 +1221,11 @@ class ControlGUI(ctk.CTk):
         key = fld["key"]
         btn = ctk.CTkButton(parent, text="?", width=26, height=26, corner_radius=13,
                             font=F_SMALL, fg_color="transparent", border_width=1,
-                            border_color=C_BORDER, hover_color=C_CARD, text_color=C_MUT,
+                            border_color=C_BORDER, hover_color=C_BG, text_color=C_MUT,
                             cursor="question_arrow")
         btn.grid(row=row, column=0, padx=(0, 8), pady=4)
-        _HelpTip(btn, lambda k=key: self._help_text(k), motion_on=self._motion_on)
+        _HelpTip(btn, lambda k=key: self._help_text(k), motion_on=self._motion_on,
+                     anim=self.anim)
 
         v = tk.StringVar()
         self.var[key] = v
@@ -1311,7 +1305,8 @@ class ControlGUI(ctk.CTk):
             btn_browse = self._btn(parent, t("browse"), lambda k=key: self._browse(k))
             btn_browse.grid(row=row, column=3, sticky="w", padx=4)
             _HelpTip(btn_browse, lambda k=key: self.var[k].get() or "",
-                     motion_on=self._motion_on)  # 路径超长时 hover 浏览按钮看全文
+                     motion_on=self._motion_on,
+                     anim=self.anim)  # 路径超长时 hover 浏览按钮看全文
             self.widgets[key] = w
             return row + 1
 
@@ -1514,7 +1509,7 @@ class ControlGUI(ctk.CTk):
         _BREATH_IDLE_S = 30  # P3：30s 无交互呼吸停帧（帧内判定，循环不终止）
         if not self._breathing or self._breath_busy:
             return
-        _breath_peak = "#ffffff" if ctk.get_appearance_mode() == "Light" else "#000000"
+        _breath_peak = "#ffffff" if _appearance == "light" else "#000000"
         self._breath_busy = True
         self._breath_id = self.anim.animate(_frame, 1200, on_done=self._breath_loop)
         self._breath_busy = False
@@ -1987,6 +1982,11 @@ class ControlGUI(ctk.CTk):
         self._drain_log()
         self._poll_log()
         self._status_worker.start()
+        # #3：真实枚举交给 worker（646ms PowerShell），首帧已用缓存渲染
+        try:
+            self._status_q.put(("services", None, None, None, None))
+        except Exception:  # noqa: BLE001
+            pass
         self._drain_status()
         self._poll_health()
 
@@ -2111,6 +2111,13 @@ class ControlGUI(ctk.CTk):
                         except Exception:  # noqa: BLE001
                             dirty = None
                     self._status_r.put(("result", state, ok, detail, dirty))
+                elif tag == "services":
+                    # #3：真实枚举（646ms PowerShell）只在 worker 跑一次
+                    try:
+                        svcs = list_nssm_services()
+                    except Exception:  # noqa: BLE001
+                        svcs = []
+                    self._status_r.put(("services", svcs, None, None, None))
             except Exception as exc:  # noqa: BLE001 - worker 任何异常不致死循环
                 self._status_r.put(("result", "UNKNOWN", False, f"worker 异常: {exc}", None))
 
@@ -2199,13 +2206,29 @@ class ControlGUI(ctk.CTk):
         if self._stop_poll:
             return
         got = None
+        svcs = None
         try:
             while True:
                 item = self._status_r.get_nowait()
-                if item and item[0] == "result":
+                if not item:
+                    continue
+                if item[0] == "result":
                     got = item
+                elif item[0] == "services":
+                    svcs = item[1]
         except queue.Empty:
             pass
+        if svcs is not None:
+            # #3：worker 枚举回灌——刷新下拉并落盘，下次启动即可首帧命中
+            try:
+                names = [s for s in svcs if isinstance(s, str)]
+                if names and names != self.settings.get("services", []):
+                    self.settings["services"] = names
+                    save_settings(self.settings)
+                if names:
+                    self.cmb_service.configure(values=self._first_paint_services())
+            except Exception:  # noqa: BLE001
+                pass
         if getattr(self, "_resizing", False):
             self.after(500, self._drain_status)
             return
@@ -2274,13 +2297,7 @@ class ControlGUI(ctk.CTk):
                 pass
             self._prune_startup_after = None
         self.anim.cancel_all()  # 停掉全部在途动画，帧回调发现不在注册表即自停
-        # 取消全部按钮渐隐 after 帧（F1：无泄漏 after；按钮销毁后回调自吞 TclError）
-        for tok in list(self._hover_fades.values()):
-            try:
-                self.after_cancel(tok)
-            except Exception:  # noqa: BLE001
-                pass
-        self._hover_fades.clear()
+        # 按钮/帮助提示渐隐帧由 self.anim 驱动，cancel_all 已统一停掉（F1/#4）
         # 取消全部字段高亮恢复计时器（D7：无泄漏 after）
         for _k, tok in list(self._field_flash_after.items()):
             try:
@@ -2404,8 +2421,6 @@ class ControlGUI(ctk.CTk):
             return
         self.settings["appearance"] = mode
         save_settings(self.settings)
-        ctk.set_appearance_mode({"system": "system", "light": "light",
-                                 "dark": "dark"}[mode])
         self._restart_ui()
 
     def _restore_setting_widgets(self):
@@ -2657,7 +2672,7 @@ class ControlGUI(ctk.CTk):
             try:
                 self._do_update_worker(rel, service, target, bak)
             except Exception as exc:  # noqa: BLE001
-                # 回滚与尽力重启已由 _do_update_worker 内部完成，这里只汇报错误
+                # 回滚与尽力重启已由 installer.install 内部完成，这里只汇报错误
                 self._log_q.put(fmt("upd.err", e=exc))
                 self._log_q.put(("__UPD_INSTALL_ERR__", str(exc)))
             finally:
@@ -2668,174 +2683,13 @@ class ControlGUI(ctk.CTk):
         threading.Thread(target=_work, daemon=False).start()
 
     def _do_update_worker(self, rel, service, target, bak):
-        """后台安装序列（绝不碰控件）：下载→停服→备份→逐文件替换→重启。
+        """后台安装序列：薄包装 installer.install（实现见 installer 深模块）。
 
-        事务保障（短期清单第 2 条）：
-        - 备份采用逐文件原子写，备份失败即中止且未替换任何文件；
-        - 替换记录 replaced 清单，任一步失败自动从 bak 精确回滚已替换文件；
-        - 失败收尾尽力重启服务，绝不静默留下停摆服务。
+        事务保障（短期清单第 2 条）：备份失败即中止且未替换任何文件；
+        任一步失败按 replaced 精确回滚；失败收尾尽力重启服务。
         """
-        assets = rel["assets"]
-        # 1) 下载官方资产到缓存目录（按 release tag 分目录）
-        dl_dir = os.path.join(UPD_DOWNLOAD_DIR, rel["tag"])
-        local_zips = []
-        for asset in assets:
-            dest = os.path.join(dl_dir, asset["name"])
-            # 缓存必须验有效性再复用：一次截断若被当作「已缓存」，之后每次重试
-            # 都拿同一个坏文件，更新会**永久失败**（实测故障）。坏缓存直接删除重下。
-            if os.path.isfile(dest) and updater.is_valid_zip(dest):
-                self._log_q.put("  " + asset["name"] + " (cached)")
-            else:
-                if os.path.isfile(dest):
-                    self._log_q.put(fmt("upd.cache.bad", n=asset["name"]))
-                    try:
-                        os.remove(dest)
-                    except OSError as exc:
-                        raise UpdateError(fmt("upd.cache.del.fail",
-                                              n=asset["name"], e=exc)) from exc
-
-                def _prog(done, total, name=asset["name"]):
-                    pct = int(done * 100.0 / max(total, 1))
-                    if pct in (0, 25, 50, 75, 100):
-                        self._log_q.put(fmt("upd.downloading", n=name, p=pct))
-                try:
-                    updater.download(asset["browser_download_url"], dest,
-                                     progress=_prog)
-                except Exception as exc:  # noqa: BLE001 - 下载失败清理残留
-                    for suffix in ("", ".part"):
-                        try:
-                            os.remove(dest + suffix)
-                        except OSError:
-                            pass
-                    raise UpdateError(str(exc)) from exc
-                # 重下后仍无效：明确中止，不进后续备份/替换
-                if not updater.is_valid_zip(dest):
-                    try:
-                        os.remove(dest)
-                    except OSError:
-                        pass
-                    raise UpdateError(fmt("upd.cache.still.bad", n=asset["name"]))
-            local_zips.append(dest)
-        # 2) 停止服务（Windows 上替换二进制必须先停）；已停止则直接继续
-        self._log_q.put(fmt("upd.stopping", s=service))
-        if sc_query_state(service) != "STOPPED":
-            ok, msg = sc_action("stop", service)
-            if not ok and sc_query_state(service) != "STOPPED":
-                raise UpdateError(fmt("upd.stop.fail", m=msg))
-        stopped = False
-        for _ in range(40):
-            if sc_query_state(service) == "STOPPED":
-                stopped = True
-                break
-            time.sleep(0.5)
-        if not stopped:
-            raise UpdateError(fmt("upd.stop.fail", m="timeout"))
-        self._log_q.put(t("upd.stopped"))
-        # 3) 备份将被覆盖的旧文件（逐文件原子写；失败则中止，未替换任何文件）
-        #    此时服务**已停止**，故本段任何失败都必须尽力把服务拉起来，
-        #    否则会留下一个停摆的服务。
-        try:
-            conflicts = updater.collect_conflicts(local_zips, target)
-        except Exception as exc:  # noqa: BLE001 - 坏 zip / IO 错误转为可读提示
-            self._log_q.put(fmt("upd.zip.bad", e=exc))
-            self._try_restart_service(service)
-            raise UpdateError(fmt("upd.zip.bad", e=exc)) from exc
-        if not conflicts:
-            self._try_restart_service(service)
-            raise UpdateError(t("upd.no.files"))
-        self._log_q.put(fmt("upd.backing", d=bak))
-        try:
-            updater.backup_files(conflicts, target, bak)
-        except OSError as exc:
-            self._log_q.put(fmt("upd.backup.fail", m=exc))
-            self._try_restart_service(service)
-            raise UpdateError(fmt("upd.backup.fail", m=exc)) from exc
-        # 4) 逐文件替换：与 conflicts 同序，失败时按 replaced 精确回滚。
-        #    同名文件以最后一个 zip 为准（与旧「按 zip 顺序逐个解压」行为一致）。
-        #    注意：服务此时**已停止**，故列举 zip 条目失败（坏包）也必须恢复服务。
-        self._log_q.put(t("upd.extracting"))
-        sources = {}
-        try:
-            for zp in local_zips:
-                for name in updater.zip_top_files(zp):
-                    sources[name] = zp
-        except Exception as exc:  # noqa: BLE001 - 坏 zip：可读提示 + 恢复服务
-            self._log_q.put(fmt("upd.zip.bad", e=exc))
-            self._try_restart_service(service)
-            raise UpdateError(fmt("upd.zip.bad", e=exc)) from exc
-        # 与旧行为一致：先覆盖目标目录中已存在的文件，再安装 zip 新增文件
-        ordered = conflicts + [n for n in sources if n not in conflicts]
-        replaced = []   # 覆盖过的旧文件（可回滚）
-        added = []      # 目标目录原本不存在的新文件（回滚时删除）
-        try:
-            for name in ordered:
-                zp = sources.get(name)
-                if zp is None:
-                    continue
-                existed = os.path.isfile(os.path.join(target, name))
-                updater.extract_one(zp, target, name)
-                if existed:
-                    replaced.append(name)
-                else:
-                    added.append(name)
-        except Exception as exc:  # noqa: BLE001 - 替换失败：回滚已替换文件后重启收尾
-            self._log_q.put(fmt("upd.extract.fail", e=exc))
-            self._rollback_files(replaced, target, bak)
-            self._remove_added_files(added, target)
-            self._try_restart_service(service)
-            raise
-        self._log_q.put("__REFRESH_STATUS__")
-        # 5) 重启服务并等待 RUNNING；未恢复 RUNNING 则回滚旧文件
-        self._log_q.put(fmt("upd.starting", s=service))
-        sc_action("start", service)
-        running = False
-        for _ in range(120):
-            if sc_query_state(service) == "RUNNING":
-                running = True
-                break
-            time.sleep(0.5)
-        if not running:
-            self._log_q.put(fmt("upd.not.running", s=service))
-            self._rollback_files(replaced, target, bak)
-            self._remove_added_files(added, target)
-            self._try_restart_service(service)
-            raise UpdateError(fmt("upd.not.running", s=service))
-        b = updater.get_installed_build(os.path.join(target, "llama-server.exe"))
-        self._log_q.put(fmt("upd.done", s=service, b=("b%d" % b) if b else "?"))
-
-    def _rollback_files(self, names, target, bak):
-        """用备份目录恢复已替换文件（worker 线程安全：只写日志队列）。"""
-        if not names:
-            return
-        self._log_q.put(t("upd.rollback"))
-        try:
-            updater.restore_files(names, target, bak)
-            self._log_q.put(t("upd.rollback.done"))
-        except Exception as exc:  # noqa: BLE001 - 回滚失败不阻断后续重启收尾
-            self._log_q.put(fmt("upd.rollback.fail", e=exc, d=bak))
-
-    def _remove_added_files(self, names, target):
-        """删除更新新增的文件（回滚清理，worker 线程安全：只写日志队列）。"""
-        if not names:
-            return
-        try:
-            updater.remove_files(names, target)
-        except Exception as exc:  # noqa: BLE001 - 清理失败不阻断后续重启收尾
-            self._log_q.put(fmt("upd.rollback.fail", e=exc, d=target))
-
-    def _try_restart_service(self, service):
-        """更新失败收尾：若服务处于 STOPPED，尽力重启（worker 线程安全）。"""
-        try:
-            if sc_query_state(service) != "STOPPED":
-                return
-            self._log_q.put(fmt("upd.starting", s=service))
-            sc_action("start", service)
-            for _ in range(120):
-                if sc_query_state(service) == "RUNNING":
-                    break
-                time.sleep(0.5)
-        except Exception:  # noqa: BLE001 - 尽力而为，失败由外层收尾日志兜底
-            pass
+        installer.install(rel, service, target, bak,
+                          sink=self._log_q.put, download_dir=UPD_DOWNLOAD_DIR)
 
 
     def _show_changelog(self, rel, cur):
@@ -2898,7 +2752,7 @@ class ControlGUI(ctk.CTk):
 
     def _restart_ui(self):
         """销毁并按新语言/调色板重建全部部件（设置即时生效）。"""
-        _apply_palette("dark" if self.settings.get("appearance") == "dark" else "light")
+        _set_appearance(self.settings.get("appearance", "system"))
         for w in self.winfo_children():
             w.destroy()
         self._upd_modal_open = False  # 语言/外观重建会销毁更新日志弹窗，复位互斥
@@ -2911,14 +2765,8 @@ class ControlGUI(ctk.CTk):
         # 字段高亮计时器全部失效（旧控件已销毁），清空即可（D7）
         self._field_flash_after.clear()
         self._suppress_trace = False
-        # F1 按钮渐隐帧：旧控件已随上方 destroy 销毁，取消防残留 after 帧。
-        # 帧回调发现 token 不在注册表即自停，兜底 winfo_exists 保证无 TclError。
-        for tok in list(self._hover_fades.values()):
-            try:
-                self.after_cancel(tok)
-            except Exception:  # noqa: BLE001
-                pass
-        self._hover_fades.clear()
+        # F1 按钮/帮助提示渐隐帧：旧控件已随上方 destroy 销毁，动画帧由共享
+        # Animator 驱动，cancel_all 已在上方停掉，帧回调兜底 winfo_exists 无 TclError。
         # D8 折叠分组展开状态保留（group_open 在 _build_widgets 里按存量恢复）
         self._breathing = False
         self._breath_id = -1

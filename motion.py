@@ -166,6 +166,8 @@ class Animator:
         self._active: Dict[int, Tuple[float, float]] = {}
         # anim_id -> (callback, on_done)（回调与注册表分离，注册表保持纯时序数据）
         self._hooks: Dict[int, Tuple[Callable[[float], None], Optional[Callable[[], None]]]] = {}
+        # anim_id -> 本段动画的帧间隔（ms；animate 未指定时取实例 frame_ms）
+        self._frames: Dict[int, int] = {}
         self._next_id = 0
         self._last_frame_ms = 0.0  # 上一次帧回调实际耗时（用 now 时钟测量）
 
@@ -208,6 +210,7 @@ class Animator:
             # 先出注册表，on_done 里再开新动画不受影响
             self._active.pop(anim_id, None)
             self._hooks.pop(anim_id, None)
+            self._frames.pop(anim_id, None)
             if on_done is not None:
                 try:
                     on_done()
@@ -223,18 +226,22 @@ class Animator:
         p = min(1.0, max(0.0, elapsed_ms / duration))
         self._frame(anim_id, p)
         if anim_id in self._active:
-            self.schedule(lambda: self._step(anim_id, start, duration), self.frame_ms)
+            self.schedule(lambda: self._step(anim_id, start, duration),
+                          self._frames.get(anim_id, self.frame_ms))
 
     # -- 公开 API -----------------------------------------------------------
 
     def animate(self, callback: Callable[[float], None],
-                duration_ms: float, on_done: Optional[Callable[[], None]] = None) -> int:
+                duration_ms: float, on_done: Optional[Callable[[], None]] = None,
+                frame_ms: Optional[int] = None) -> int:
         """启动一段动画，返回 anim_id。
 
-        每帧（约 16ms）算进度 p = elapsed/duration（0 → 1 单调），把 p 传给 callback；
-        GUI 侧在 callback(p) 里做 hex 插值渲染。duration_ms <= 0 时同步直跳 callback(1)
-        并立即调 on_done；启动前检查：活动数 > max_active 或上一帧超 frame_budget_ms
-        时降级为瞬时完成。瞬时完成 / 直跳场景不进入注册表，返回 -1 表示无 anim_id。
+        每帧算进度 p = elapsed/duration（0 → 1 单调），把 p 传给 callback；
+        GUI 侧在 callback(p) 里做 hex 插值渲染。frame_ms 覆盖本段动画的帧间隔
+        （None 用实例默认 self.frame_ms；长驻动效放宽、瞬时过渡用 16ms）。
+        duration_ms <= 0 时同步直跳 callback(1) 并立即调 on_done；启动前检查：
+        活动数 > max_active 或上一帧超 frame_budget_ms 时降级为瞬时完成。
+        瞬时完成 / 直跳场景不进入注册表，返回 -1 表示无 anim_id。
         """
         if duration_ms <= 0:
             self._instant(callback, on_done)
@@ -245,10 +252,12 @@ class Animator:
         self._next_id += 1
         anim_id = self._next_id
         start = self.now()
+        interval = int(frame_ms) if frame_ms is not None else self.frame_ms
         self._active[anim_id] = (start, float(duration_ms))
         self._hooks[anim_id] = (callback, on_done)
-        # 用注入的 schedule 自调度第一帧（每帧 schedule(step, 16)），不依赖 Tk after 也不开线程。
-        self.schedule(lambda: self._step(anim_id, start, float(duration_ms)), self.frame_ms)
+        self._frames[anim_id] = interval
+        # 用注入的 schedule 自调度第一帧（每帧 schedule(step, interval)），不依赖 Tk after 也不开线程。
+        self.schedule(lambda: self._step(anim_id, start, float(duration_ms)), interval)
         return anim_id
 
     def cancel(self, anim_id: int) -> bool:
@@ -256,12 +265,14 @@ class Animator:
         if self._active.pop(anim_id, None) is None:
             return False
         self._hooks.pop(anim_id, None)
+        self._frames.pop(anim_id, None)
         return True
 
     def cancel_all(self) -> None:
         """取消全部活动动画（已排队的帧回调发现不在注册表即自停）。"""
         self._active.clear()
         self._hooks.clear()
+        self._frames.clear()
 
 
 # ---------------------------------------------------------------------------
