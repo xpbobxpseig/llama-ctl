@@ -33,3 +33,29 @@ def test_cache_miss_prepends_current():
 
 def test_non_str_entries_dropped():
     assert _call("Svc", [1, "A", None]) == ["Svc", "A"]
+
+
+def test_upd_channel_falls_back_when_persisted_value_is_retired():
+    """旧 settings.json 存的退役变体必须回退到默认。
+
+    根因回归：官方停发 13.3 后 CHANNELS 里删掉了该键，但用户本地 settings.json
+    仍存着 "win-cuda-13.3-x64"。若 _upd_channel() 原样返回它，每次检查都会请求
+    一个官方不再产出的 channel，报「未找到匹配资产」。
+    """
+    def ch(stored):
+        fake = types.SimpleNamespace(settings={"upd_channel": stored})
+        return g.ControlGUI._upd_channel(fake)
+
+    assert ch("win-cuda-13.3-x64") == g.updater.DEFAULT_CHANNEL
+    assert ch("win-cuda-12.4-x64") == "win-cuda-12.4-x64"   # 合法值原样保留
+    assert ch("bogus-channel") == g.updater.DEFAULT_CHANNEL
+    assert ch("") == g.updater.DEFAULT_CHANNEL
+    assert ch(None) == g.updater.DEFAULT_CHANNEL
+
+
+def test_every_offered_channel_is_a_known_channel():
+    """下拉里能选到的每个值都必须能被 _upd_channel() 原样保留（显示 = 实际检查）。"""
+    for channel in g.updater.CHANNEL_ORDER:
+        fake = types.SimpleNamespace(settings={"upd_channel": channel})
+        assert g.ControlGUI._upd_channel(fake) == channel
+

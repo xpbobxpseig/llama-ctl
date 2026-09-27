@@ -83,7 +83,7 @@ python llama_ctl_gui.py
 设置页「官方更新」区可自动同步 [`ggml-org/llama.cpp`](https://github.com/ggml-org/llama.cpp) 官方最新构建：
 
 - **启动自动检查**（默认开）：后台查询官方 releases，发现新构建时弹窗显示更新日志并提示是否更新；绝不在无确认的情况下下载或安装。
-- **二进制版本**：`win-cuda-13.3-x64`（默认）/ `win-cuda-12.4-x64` / `win-cpu-x64` / `win-vulkan-x64`，自动匹配对应官方 zip 资产。
+- **二进制版本**：`win-cuda-13.4-x64`（默认）/ `win-cuda-12.4-x64` / `win-cpu-x64` / `win-vulkan-x64`，自动匹配对应官方 zip 资产。（`win-cuda-13.3-x64` 已随官方停发而下线；旧配置里残留的该值会自动回退到默认版本。）
 - **立即更新**：二次确认（含备份目录）→ 停止服务 → 下载 zip（已缓存则复用）→ 旧文件备份到 `backup\{tag}\{时间戳}\` → 解压替换 llama.cpp 目录下文件 → 重启服务并确认 RUNNING。
 - 全过程日志实时输出；任何一步失败会弹错误框且不会半途替换二进制（逐文件原子替换）。
 - 替换目标优先按当前服务 NSSM `AppDirectory` 推导，回退 `LLAMA_CTL_LLAMA_DIR`。
@@ -235,7 +235,7 @@ The top-bar "Settings" button opens a page with UI language (parameter guides st
 The Settings page's "Official updates" section syncs the latest builds from [`ggml-org/llama.cpp`](https://github.com/ggml-org/llama.cpp):
 
 - **Auto-check on startup** (on by default): queries official releases in the background; when a new build appears it shows the changelog and asks whether to update. It never downloads or installs without confirmation.
-- **Build variant**: `win-cuda-13.3-x64` (default) / `win-cuda-12.4-x64` / `win-cpu-x64` / `win-vulkan-x64`, matched to the corresponding official zip asset.
+- **Build variant**: `win-cuda-13.4-x64` (default) / `win-cuda-12.4-x64` / `win-cpu-x64` / `win-vulkan-x64`, matched to the corresponding official zip asset. (`win-cuda-13.3-x64` was retired once upstream stopped publishing it; a stale value in an old config falls back to the default automatically.)
 - **Update now**: second confirmation (including the backup directory) → stop service → download zip (reused if cached) → back up old files to `backup\{tag}\{timestamp}\` → unzip over the llama.cpp directory → restart the service and confirm RUNNING.
 - Full progress is logged live; any failure pops an error dialog and never leaves binaries half-replaced (atomic per-file replace).
 - The replace target is derived from the current service's NSSM `AppDirectory`, falling back to `LLAMA_CTL_LLAMA_DIR`.

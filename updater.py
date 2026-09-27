@@ -10,63 +10,76 @@ updater.py — llama.cpp 官方更新检查与安装（llama_ctl）
   - download / collect_conflicts / extract_top_level  下载、备份清单、解压替换
 
 官方 nightly 发布规律（2026-09）：
-  - 最新稳定 release（如 v0.4.0）只挂 nightly-tag.txt，真正的二进制挂在
-    b10819 / b10818 … 等 nightly tag 上，故按 per_page 列表顺序找第一个
-    含匹配资产的 release。
-  - Windows CUDA 版拆成两个 zip：主二进制 llama-bNNNNN-bin-win-cuda-13.3-x64.zip
-    与 CUDA 运行时 cudart-llama-bin-win-cuda-13.3-x64.zip；CPU/Vulkan 只有一个 zip。
+  - Releases 网页先列 nightly tag，再展开每个 tag 的资产；按页面顺序找到
+    第一个包含所选 Windows 二进制的构建。
+  - Windows CUDA 版拆成主二进制与 CUDA 运行时两个 zip；CPU/Vulkan 只有主二进制 zip。
 """
 
-import json
 import os
 import re
 import shutil
 import subprocess
 import zipfile
+from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
-REPO_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases"
+RELEASES_PAGE = "https://github.com/ggml-org/llama.cpp/releases"
+RELEASES_BASE = "https://github.com/ggml-org/llama.cpp/releases/"
 USER_AGENT = "llama_ctl-updater/1.0"
 
 # 二进制变体（channel 即资产名中的 -bin- 后缀段；下拉展示 label）
+#
+# 必须镜像官方实际发布的变体：官方停止产出某个 CUDA 版本后，该 channel 会
+# 永远匹配不到资产。曾以 win-cuda-13.3-x64 为默认，官方改发 13.4 后弃用了
+# 13.3（实测 b11201-b11213 只剩 cuda-12.4 / cuda-13.4 / cuda-13.4-arm64），
+# 而旧 settings.json 仍存着 13.3，于是每次检查都报「未找到匹配资产」。
+# 退役变体一律从这里删除：_upd_channel() 会把不在表内的持久化值回退到默认。
 CHANNELS = {
-    "win-cuda-13.3-x64": "CUDA 13.3 (x64)",
+    "win-cuda-13.4-x64": "CUDA 13.4 (x64)",
     "win-cuda-12.4-x64": "CUDA 12.4 (x64)",
     "win-cpu-x64": "CPU (x64)",
     "win-vulkan-x64": "Vulkan (x64)",
 }
 CHANNEL_ORDER = list(CHANNELS.keys())
-DEFAULT_CHANNEL = "win-cuda-13.3-x64"
+DEFAULT_CHANNEL = "win-cuda-13.4-x64"
 
 
 class UpdateError(Exception):
     """更新流程中可预期失败（网络 / 资产缺失 / 校验不通过）。"""
 
 
-def http_json(url, timeout=25):
-    """GET 并解析 JSON。支持可选 GITHUB_TOKEN 环境变量缓解 API 限流（60 次/时）。
-
-    限流（403/429）时抛 UpdateError 并附 token 提示，GUI 可直接展示。
-    """
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/vnd.github+json",
-    }
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
-    if token:
-        headers["Authorization"] = "Bearer " + token
-    req = Request(url, headers=headers)
+def http_text(url, timeout=25):
+    """GET 网页并返回 UTF-8 文本；使用 GitHub 网页端，不依赖 API token。"""
+    req = Request(url, headers={"User-Agent": USER_AGENT,
+                                "Accept": "text/html"})
     try:
         with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
+            return resp.read().decode("utf-8", "replace")
     except HTTPError as exc:
-        hint = ("（GitHub API 限流：可设置环境变量 GITHUB_TOKEN 后重试）"
-                if exc.code in (403, 429) else "")
-        raise UpdateError("官方接口 HTTP %s %s" % (exc.code, hint)) from exc
+        raise UpdateError("GitHub Releases 页面 HTTP %s" % exc.code) from exc
     except URLError as exc:
         raise UpdateError("网络错误：%s" % getattr(exc, "reason", exc)) from exc
-    return json.loads(raw.decode("utf-8"))
+
+
+def _page_links(html):
+    """提取网页中的链接；HTMLParser 会处理属性引号与 HTML 实体。"""
+    class LinkParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                href = dict(attrs).get("href")
+                if href:
+                    self.links.append(href)
+
+    parser = LinkParser()
+    parser.feed(html)
+    return parser.links
+
 
 
 def parse_build(tag):
@@ -114,6 +127,7 @@ def select_assets(release, channel):
     wanted = {
         "llama-b%d-bin-%s.zip" % (build, channel),
         "cudart-llama-bin-%s.zip" % channel,
+        "cudart-llama-b%d-bin-%s.zip" % (build, channel),
     }
     picked = []
     for asset in release.get("assets") or []:
@@ -124,48 +138,64 @@ def select_assets(release, channel):
 
 
 def find_latest_release(channel):
-    """找第一个包含该 channel 资产的非草稿 release。
-
-    返回 dict(tag/name/html_url/body/build/assets/published_at)；找不到抛
-    UpdateError（网络错误原样上抛，由 GUI 统一显示）。
-    """
-    releases = http_json(REPO_API + "?per_page=30")
-    if not isinstance(releases, list):
-        raise UpdateError("官方接口返回格式异常")
-    for rel in releases:
-        if rel.get("draft"):
-            continue
-        assets = select_assets(rel, channel)
+    """从 GitHub Releases 网页找第一个包含所选渠道资产的 nightly。"""
+    page = http_text(RELEASES_PAGE)
+    tags = []
+    for href in _page_links(page):
+        match = re.fullmatch(r"/ggml-org/llama\.cpp/releases/tag/([^/?#]+)",
+                             urlparse(href).path)
+        tag = unquote(match.group(1)) if match else ""
+        if tag and parse_build(tag) and tag not in tags:
+            tags.append(tag)
+    for tag in tags[:30]:
+        assets_page = http_text(urljoin(RELEASES_BASE,
+                                        "expanded_assets/" + tag))
+        assets = []
+        for href in _page_links(assets_page):
+            path = urlparse(href).path
+            match = re.fullmatch(
+                r"/ggml-org/llama\.cpp/releases/download/([^/]+)/([^/]+)", path)
+            if not match or unquote(match.group(1)) != tag:
+                continue
+            name = unquote(match.group(2))
+            assets.append({"name": name, "browser_download_url":
+                           urljoin("https://github.com", href)})
+        assets = select_assets({"tag_name": tag, "assets": assets}, channel)
         if assets:
-            build = parse_build(rel.get("tag_name") or "")
             return {
-                "tag": rel.get("tag_name") or "",
-                "name": rel.get("name") or rel.get("tag_name") or "",
-                "html_url": rel.get("html_url") or "",
-                "body": rel.get("body") or "",
-                "build": build,
-                "published_at": rel.get("published_at") or "",
+                "tag": tag,
+                "name": tag,
+                "html_url": urljoin(RELEASES_BASE, "tag/" + tag),
+                "body": "",
+                "build": parse_build(tag),
+                "published_at": "",
                 "assets": assets,
             }
-    raise UpdateError("未找到匹配的官方发布资产（channel: %s）" % channel)
+    raise UpdateError("GitHub Releases 页面中未找到匹配资产（channel: %s）"
+                      % channel)
 
 
 def is_valid_zip(path):
-    """path 是否为可用的 zip（存在、可打开、条目列表可读）。
+    """path 是否为可用的 zip：**逐条目校验数据**，而非只读中央目录。
 
-    供缓存复用前校验：坏缓存必须能被识别出来，否则一次截断会让更新**永久失败**
-    （每次重试都拿同一个坏文件）。任何异常一律返回 False，绝不抛出——校验函数的
-    调用方不应因为「文件损坏」本身而崩溃。
+    供缓存复用前校验：坏缓存必须能被识别出来，否则一次数据损坏会让更新**永久
+    失败**（每次重试都拿同一个坏文件）。任何异常一律返回 False，绝不抛出——校验
+    函数的调用方不应因为「文件损坏」本身而崩溃。
+
+    为什么必须读到数据（两起实测故障）：
+      1. 截断：文件被截短，中央目录（在文件末尾）根本读不到。
+      2. 清零：长度恰好等于服务端 Content-Length、中央目录也完好，但 92.65% 的
+         字节成了 0（一个 392 MB 的连续零区）。此时 `infolist()` 完全正常，旧实现
+         因此判为「可用」→ 缓存被永久复用 → 每次解压都在 cublas64_13.dll 上报
+         「Bad CRC-32 for file」。只有 testzip()（逐条目解压并核对 CRC）能发现。
     """
     try:
         if not path or not os.path.isfile(path):
             return False
         with zipfile.ZipFile(path) as zf:
-            zf.infolist()   # 真正解析中央目录，能读出来才算可用
-        return True
+            return zf.testzip() is None   # 真正读取每个条目并核对 CRC
     except Exception:  # noqa: BLE001 - 损坏/权限/IO 一律视为不可用
         return False
-
 
 def download(url, dest, progress=None):
     """流式下载到 dest（先写 .part 再原子改名）。progress(done, total)。

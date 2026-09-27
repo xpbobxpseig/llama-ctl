@@ -2370,15 +2370,18 @@ class ControlGUI(ctk.CTk):
         # 二进制变体（内部存 channel 键，下拉展示友好名）
         ctk.CTkLabel(win, text=t("upd.channel"), font=F_BODY, text_color=C_MUT,
                      anchor="w").pack(fill="x", padx=20, pady=(10, 4))
-        self._upd_channel_var = tk.StringVar(
-            value=self.settings.get("upd_channel", updater.DEFAULT_CHANNEL))
         _ch_names = {ch: updater.CHANNELS.get(ch, ch) for ch in updater.CHANNEL_ORDER}
+        _ch_keys = {v: k for k, v in _ch_names.items()}
+        # 显示值取自 _upd_channel()（已把退役/非法的持久化值回退到默认）。若直接读
+        # settings，旧 settings.json 存的退役变体会让下拉显示旧版本、而检查用默认版本，
+        # 用户看到「下拉显示 13.4 却报 channel 13.3」的错位，误以为修复没生效。
+        self._upd_channel_var = tk.StringVar(value=_ch_names[self._upd_channel()])
         ctk.CTkOptionMenu(
             win, values=list(_ch_names.values()), width=220, font=F_BODY,
+            variable=self._upd_channel_var,
             command=lambda shown: self._change_upd_channel(
-                {v: k for k, v in _ch_names.items()}.get(shown, shown))
+                _ch_keys.get(shown, shown))
         ).pack(anchor="w", padx=20)
-        self._upd_channel_var.set(self.settings.get("upd_channel", updater.DEFAULT_CHANNEL))
 
         # 启动自动检查开关
         self._upd_auto_var = tk.BooleanVar(

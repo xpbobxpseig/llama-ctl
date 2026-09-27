@@ -66,33 +66,59 @@ def test_select_assets_requires_build_tag():
                                  "win-cuda-13.3-x64") == []
 
 
+def test_retired_cuda_13_3_channel_is_not_offered():
+    """官方已停止产出 13.3（实测 b11201-b11213 只有 12.4 / 13.4）：退役变体必须
+    从 CHANNELS 移除，否则 check 永远匹配不到资产（本次故障根因）。"""
+    assert "win-cuda-13.4-x64" in updater.CHANNELS
+    assert updater.DEFAULT_CHANNEL == "win-cuda-13.4-x64"
+    assert "win-cuda-13.3-x64" not in updater.CHANNELS
+    assert "win-cuda-13.3-x64" not in updater.CHANNEL_ORDER
+
+
+
 # ---------------------------------------------------------------------------
-# find_latest_release：跳过不含目标资产的 release，取第一个可用的
+# find_latest_release：跳过没有渠道资产的较新 tag，解析网页下载链接
 # ---------------------------------------------------------------------------
 
-def test_find_latest_release_skips_empty_releases(monkeypatch):
-    def fake_json(url):
-        return [
-            {"tag_name": "v0.4.0", "draft": False, "html_url": "https://x/v0.4.0",
-             "body": "stable", "published_at": "2026-09-04T00:00:00Z",
-             "assets": [{"name": "nightly-tag.txt"}]},
-            {"tag_name": "b10819", "draft": False, "html_url": "https://x/b10819",
-             "body": "nightly changelog", "published_at": "2026-09-05T00:00:00Z",
-             "assets": [{"name": "llama-b10819-bin-win-cuda-13.3-x64.zip",
-                         "browser_download_url": "https://x/a.zip"}]},
-        ]
+def test_find_latest_release_skips_tags_without_channel_assets(monkeypatch):
+    pages = {
+        updater.RELEASES_PAGE: (
+            '<a href="/ggml-org/llama.cpp/releases/tag/b10820">b10820</a>'
+            '<a href="/ggml-org/llama.cpp/releases/tag/b10819">b10819</a>'
+            '<a href="/ggml-org/llama.cpp/releases/tag/v0.4.0">stable</a>'),
+        updater.RELEASES_BASE + "expanded_assets/b10820": (
+            '<a href="/ggml-org/llama.cpp/releases/download/b10820/'
+            'llama-b10820-bin-win-cpu-x64.zip">CPU</a>'),
+        updater.RELEASES_BASE + "expanded_assets/b10819": (
+            '<a href="/ggml-org/llama.cpp/releases/download/b10819/'
+            'llama-b10819-bin-win-cuda-13.3-x64.zip">binary</a>'
+            '<a href="/ggml-org/llama.cpp/releases/download/b10819/'
+            'cudart-llama-b10819-bin-win-cuda-13.3-x64.zip">runtime</a>'),
+    }
+    monkeypatch.setattr(updater, "http_text", lambda url: pages[url])
 
-    monkeypatch.setattr(updater, "http_json", fake_json)
     rel = updater.find_latest_release("win-cuda-13.3-x64")
+
     assert rel["tag"] == "b10819"
     assert rel["build"] == 10819
-    assert len(rel["assets"]) == 1
+    assert [a["name"] for a in rel["assets"]] == [
+        "llama-b10819-bin-win-cuda-13.3-x64.zip",
+        "cudart-llama-b10819-bin-win-cuda-13.3-x64.zip",
+    ]
+    assert rel["assets"][0]["browser_download_url"] == (
+        "https://github.com/ggml-org/llama.cpp/releases/download/b10819/"
+        "llama-b10819-bin-win-cuda-13.3-x64.zip")
 
 
-def test_find_latest_release_raises_when_no_match(monkeypatch):
-    monkeypatch.setattr(updater, "http_json",
-                        lambda url: [{"tag_name": "v0.4.0", "draft": False,
-                                      "assets": [{"name": "nightly-tag.txt"}]}])
+def test_find_latest_release_raises_when_no_matching_assets(monkeypatch):
+    pages = {
+        updater.RELEASES_PAGE:
+            '<a href="/ggml-org/llama.cpp/releases/tag/b10820">b10820</a>',
+        updater.RELEASES_BASE + "expanded_assets/b10820":
+            '<a href="/ggml-org/llama.cpp/releases/download/b10820/'
+            'llama-b10820-bin-win-cpu-x64.zip">CPU</a>',
+    }
+    monkeypatch.setattr(updater, "http_text", lambda url: pages[url])
     with pytest.raises(updater.UpdateError):
         updater.find_latest_release("win-cuda-13.3-x64")
 
@@ -407,6 +433,39 @@ def test_is_valid_zip_rejects_truncated(tmp_path):
     assert updater.is_valid_zip(str(p)) is False
 
 
+
+def test_is_valid_zip_rejects_zeroed_entry_data(tmp_path):
+    """真实故障形态：中央目录完好（只读 infolist 会判为可用），但条目数据被清零。
+
+    实测：downloads/b11213/cudart-...zip 长度恰好正确（423,535,356 B = 服务端
+    Content-Length），中央目录完好，但 92.65% 的字节是 0（一个 392 MB 的连续零区，
+    终点正好落在 1 MiB 分块边界）。旧 is_valid_zip 只调 infolist()（读文件末尾的
+    索引），于是判为「可用」→ 缓存被永久复用 → 每次解压都在 cublas64_13.dll 上报
+    「Bad CRC-32」。校验必须覆盖数据本身。
+    """
+    payload = b"A" * 20000
+    data = bytearray(_zip_bytes_stored({"cublas64_13.dll": payload}))
+    # 存储式（无压缩）：载荷在文件中是字面量，直接清零即模拟数据丢失
+    at = data.find(payload)
+    assert at != -1
+    data[at:at + len(payload)] = b"\x00" * len(payload)
+    p = tmp_path / "zeroed.zip"
+    p.write_bytes(bytes(data))
+
+    with zipfile.ZipFile(str(p)) as zf:
+        zf.infolist()                      # 中央目录仍可读（旧判据会误判为有效）
+
+    assert updater.is_valid_zip(str(p)) is False
+
+
+def _zip_bytes_stored(files):
+    """与 _zip_bytes 相同，但用 ZIP_STORED（载荷字面存放，便于精确定位）。"""
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
 def test_is_valid_zip_rejects_missing_and_nonzip(tmp_path):
     assert updater.is_valid_zip(str(tmp_path / "nope.zip")) is False
     txt = tmp_path / "plain.zip"
