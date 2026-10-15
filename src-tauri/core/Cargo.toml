@@ -7,6 +7,10 @@ edition = "2024"
 encoding_rs = "0.8.42"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.154"
+# Upstream zips are deflate-compressed; `deflate` is the only compressor we
+# need. Everything else (bzip2/zstd/lzma/time) is off so no codec we never see
+# is compiled in.
+zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 serde_json = "1.0.154"

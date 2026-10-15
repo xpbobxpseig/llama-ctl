@@ -5,3 +5,5 @@ pub mod persist;
 pub mod i18n;
 pub mod params;
 pub mod updater;
+pub mod service;
+pub mod update_files;
