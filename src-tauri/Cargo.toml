@@ -1,0 +1,32 @@
+[package]
+name = "llama-ctl"
+version = "0.1.0"
+description = "llama.cpp 服务控制台 — 接管由 NSSM 管理的 llama.cpp 服务"
+edition = "2024"
+rust-version = "1.85"
+
+# The binary carries the `requireAdministrator` manifest (ADR-0001), which
+# tauri-build embeds from `app.manifest` below.
+build = "build.rs"
+
+[lib]
+name = "llama_ctl_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+llama-ctl-commands = { path = "./commands" }
+llama-ctl-core = { path = "./core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["protocol-asset"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[profile.release]
+# NSIS bundle size (ADR-0002): LTO plus a single codegen unit over panic
+# unwinding, which this app never recovers from anyway.
+codegen-units = 1
+lto = true
+panic = "abort"
+strip = true

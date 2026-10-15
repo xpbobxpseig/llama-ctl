@@ -175,11 +175,24 @@ pub fn install(
     let mut downloaded = 0usize;
     for asset in &rel.assets {
         let dest = dl_dir.join(&asset.name);
-        let mut progress = |_bytes: u64| {
-            // `Deps::http_get` yields no Content-Length, so there is no total
-            // to divide by — the line reports the one thing that is true: the
-            // body landed. Same gap ticket 06 recorded for the download itself.
-            sink(&fmt("upd.downloading", &[("n", asset.name.as_str()), ("p", "100")]));
+        // Python emits 0/25/50/75/100 rather than every percent, so the log
+        // stays readable on a 400 MB asset.
+        let mut last_pct: i64 = -1;
+        let mut progress = |done: u64, total: u64| {
+            let pct = if total == 0 {
+                100
+            } else {
+                (done as u128 * 100 / total as u128) as i64
+            };
+            let step = pct / 25 * 25;
+            if step == last_pct {
+                return;
+            }
+            last_pct = step;
+            sink(&fmt(
+                "upd.downloading",
+                &[("n", asset.name.as_str()), ("p", &step.to_string())],
+            ));
         };
         let out = download_asset(d, &asset.url, &dest, &DownloadOptions::default(), Some(&mut progress))?;
         if out.cached {

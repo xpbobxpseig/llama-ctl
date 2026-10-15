@@ -21,3 +21,10 @@ _smoke_p3.py
 # 一次性基准/性能测试输出（llama-bench 结果，不进仓库）
 bench*.txt
 src-tauri/core/target/
+# 两个新 crate 的构建产物（与 core 同一约定：只忽略 target，不建嵌套 git 目录）
+src-tauri/commands/target/
+src-tauri/target/
+src-tauri/gen/
+
+# 占位前端的 node 依赖（ticket 12 会引入构建工具）
+frontend/node_modules/

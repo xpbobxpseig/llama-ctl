@@ -41,10 +41,13 @@ pub trait Deps {
     fn remove_file(&self, path: &Path) -> Result<(), DepsError>;
     fn list_dir(&self, path: &Path) -> Result<Vec<DirEntry>, DepsError>;
     fn create_dir_all(&self, path: &Path) -> Result<(), DepsError>;
-
-    /// `GET` a URL and return the body. Used for release discovery only —
-    /// binary downloads stream through `download`, never through the renderer.
-    fn http_get(&self, url: &str) -> Result<Vec<u8>, DepsError>;
+    /// `GET` a URL, returning the body and the declared `Content-Length`.
+    ///
+    /// The length is what makes download progress expressible as a percentage;
+    /// without it the UI can only report bytes received, which does not fit the
+    /// `upd.downloading` copy ("{n}（{p}%）"). `None` when the server omitted
+    /// the header — callers must degrade gracefully.
+    fn http_get(&self, url: &str) -> Result<HttpBody, DepsError>;
 
     /// `true` when the service answered `/healthz`.
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError>;
@@ -76,6 +79,27 @@ pub struct DepsError {
     pub kind: DepsErrorKind,
     pub message: String,
 }
+
+/// An HTTP response body plus the server's declared length.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HttpBody {
+    pub bytes: Vec<u8>,
+    /// `Content-Length` as declared. `None` when absent — progress then has no
+    /// denominator and callers report bytes instead of a percentage.
+    pub content_length: Option<u64>,
+}
+
+impl HttpBody {
+    pub fn new(bytes: Vec<u8>, content_length: Option<u64>) -> Self {
+        Self { bytes, content_length }
+    }
+
+    /// Length the server declared, falling back to the bytes actually received.
+    pub fn len_hint(&self) -> u64 {
+        self.content_length.unwrap_or(self.bytes.len() as u64)
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DepsErrorKind {

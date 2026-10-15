@@ -1,4 +1,4 @@
-//! Ticket 06 acceptance: download integrity, zip validation, atomic replace,
+﻿//! Ticket 06 acceptance: download integrity, zip validation, atomic replace,
 //! Backup/restore, stale-directory cleanup.
 //!
 //! Ported from the file half of `tests/test_updater.py`. Everything runs
@@ -10,7 +10,7 @@
 //! replacement must leave the previous file byte-identical.
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
-use llama_ctl_core::deps::{AppErrorKind, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
+use llama_ctl_core::deps::{HttpBody, AppErrorKind, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
 use llama_ctl_core::fake::{Call, FakeDeps};
 use llama_ctl_core::update_files::{
     DownloadOptions, PART_SUFFIX, PRUNE_KEEP, backup_dir, backup_files, cleanup_stale_dirs,
@@ -165,14 +165,23 @@ fn retries_spend_every_attempt_and_still_leave_nothing_behind() {
 }
 
 #[test]
-fn progress_reports_the_bytes_written() {
-    let mut seen = Vec::new();
+fn progress_reports_received_and_total_so_the_ui_can_show_a_percentage() {
+    let mut seen: Vec<(u64, u64)> = Vec::new();
     let zip = good_zip();
-    let d = FakeDeps::new().with_http(URL, Ok(zip.clone()));
+    // A declared Content-Length is what makes a percentage possible; assert
+    // both the received count and the total the UI divides by.
+    let d = FakeDeps::new().with_http_len(URL, Ok(zip.clone()), Some(zip.len() as u64));
 
-    download_asset(&d, URL, &dest("main.zip"), &one_shot(), Some(&mut |n: u64| seen.push(n))).unwrap();
+    download_asset(
+        &d,
+        URL,
+        &dest("main.zip"),
+        &one_shot(),
+        Some(&mut |done: u64, total: u64| seen.push((done, total))),
+    )
+    .unwrap();
 
-    assert_eq!(seen, vec![zip.len() as u64]);
+    assert_eq!(seen, vec![(zip.len() as u64, zip.len() as u64)]);
 }
 
 #[test]
@@ -296,7 +305,7 @@ impl Deps for FlakyNet<'_> {
     }
     /// Every `http_get`, successful or not, goes through the inner fake so the
     /// call log stays complete; the first `fail_first` answers then fail.
-    fn http_get(&self, url: &str) -> Result<Vec<u8>, DepsError> {
+    fn http_get(&self, url: &str) -> Result<HttpBody, DepsError> {
         let body = self.inner.http_get(url);
         if self.fail_first.get() > 0 {
             self.fail_first.set(self.fail_first.get() - 1);

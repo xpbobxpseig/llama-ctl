@@ -1,4 +1,4 @@
-//! Official updater, file half (ticket 06).
+﻿//! Official updater, file half (ticket 06).
 //!
 //! Port of `updater.py`'s second half: download with retry and backoff, zip
 //! validation, conflict detection, per-file atomic replacement, timestamped
@@ -14,7 +14,7 @@
 //! load-bearing and recorded in the ticket's `## Resolution`:
 //!
 //! * `http_get` returns bytes only — no status, no headers — so there is no
-//!   Content-Length (progress reports bytes received, not a percentage) and no
+//!   Content-Length is now carried through, so progress is (received, total)
 //!   `Range` (a retry re-fetches the whole asset instead of resuming).
 //! * there is no `remove_dir`, so cleanup empties a stale directory rather
 //!   than unlinking it.
@@ -94,7 +94,7 @@ pub fn download_asset(
     url: &str,
     dest: &Path,
     opts: &DownloadOptions,
-    progress: Option<&mut dyn FnMut(u64)>,
+    progress: Option<&mut dyn FnMut(u64, u64)>,
 ) -> AppResult<DownloadOutcome> {
     let mut progress = progress;
     if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -138,15 +138,17 @@ pub fn download_asset(
                 continue;
             }
         };
-        if let Err(e) = d.write_file(&part, &body) {
+        if let Err(e) = d.write_file(&part, &body.bytes) {
             let _ = d.remove_file(&part);
             last = Some(update_error(e));
             continue;
         }
+        // Progress is (received, total) so the UI can show a percentage; the
+        // total is the declared Content-Length, falling back to what arrived.
         if let Some(cb) = progress.as_deref_mut() {
-            cb(body.len() as u64);
+            cb(body.bytes.len() as u64, body.len_hint());
         }
-        if !is_valid_zip_bytes(&body) {
+        if !is_valid_zip_bytes(&body.bytes) {
             let _ = d.remove_file(&part);
             last = Some(AppError::new(
                 AppErrorKind::UpdateFailed,
@@ -163,7 +165,7 @@ pub fn download_asset(
                     path: dest.to_path_buf(),
                     cached: false,
                     attempts: attempt + 1,
-                    bytes: body.len() as u64,
+                    bytes: body.bytes.len() as u64,
                 })
             }
             Err(e) => {

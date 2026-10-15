@@ -1,4 +1,4 @@
-# 06: updater — 下载、zip 校验、原子替换与陈旧目录清理
+﻿# 06: updater — 下载、zip 校验、原子替换与陈旧目录清理
 
 **What to build:** 移植官方更新的「后半段」：带重试与退避的下载、缓存 zip 的有效性校验、逐文件原子替换、备份与还原、以及陈旧下载与备份目录的清理。用户视角：更新过程要么完整完成，要么完整回到原样，绝不留下半替换的二进制。
 
@@ -82,3 +82,12 @@ ticket 10 精确 Rollback）、`backup_dir` / `timestamp`、`backup_files`、`re
 `test_download_resume_restarts_from_zero_when_server_ignores_range`、
 `test_download_keeps_partial_file_across_attempts`）——这些断言的是 seam 无法表达的
 HTTP 细节，其 Rust 对应物是「重试后成功」（已覆盖）与「`.part` 转正」（已覆盖）。
+
+## 遗留待办（Carry-over）—— 已解决
+
+原记录：`http_get` 不返回 Content-Length，进度只能报字节数，GUI 文案
+`upd.downloading`（`{n}（{p}%）`）会退化为「只跳一个 100%」。
+
+已修：`Deps::http_get` 改返回 `HttpBody { bytes, content_length }`，
+`FakeDeps` 加 `with_http_len`，`download_asset` 的进度回调改报
+`(received, total)`，`install` 按 Python 的 0/25/50/75/100 步进发日志行。

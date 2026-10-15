@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "llama-ctl only ever talks to its own Rust commands — no shell, no HTTP from the renderer, no filesystem of its own. ADR-0001: the renderer runs elevated, so it gets nothing it does not need.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

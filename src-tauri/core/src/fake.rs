@@ -1,4 +1,4 @@
-//! Test double for `Deps`: in-memory, records every call, never touches the OS.
+﻿//! Test double for `Deps`: in-memory, records every call, never touches the OS.
 //!
 //! Lives in the crate (not behind `#[cfg(test)]`) so integration tests in
 //! `tests/` can use it too — that is where the migrated domain tests will go.
@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
+use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, HttpBody, RegHive};
 
 /// One recorded invocation. Tests assert on these, e.g. "facts() spawned
 /// nothing" becomes `fake.calls().iter().any(|c| c.is_spawn())`.
@@ -42,7 +42,7 @@ pub struct FakeDeps {
     reg_strings: HashMap<(String, String), Option<String>>,
     files: RefCell<HashMap<PathBuf, Vec<u8>>>,
     dirs: HashMap<PathBuf, Vec<DirEntry>>,
-    http: HashMap<String, Result<Vec<u8>, DepsError>>,
+    http: HashMap<String, Result<HttpBody, DepsError>>,
     health: HashMap<(String, u16), bool>,
     now: u64,
     /// Simulated failures, applied by path so a test can make exactly one
@@ -83,7 +83,20 @@ impl FakeDeps {
     }
 
     pub fn with_http(mut self, url: &str, body: Result<Vec<u8>, DepsError>) -> Self {
-        self.http.insert(url.to_string(), body);
+        self.http.insert(url.to_string(), body.map(|b| HttpBody::new(b, None)));
+        self
+    }
+
+    /// Same as [`with_http`] but declaring a `Content-Length`, which is what
+    /// makes percentage progress testable.
+    pub fn with_http_len(
+        mut self,
+        url: &str,
+        body: Result<Vec<u8>, DepsError>,
+        content_length: Option<u64>,
+    ) -> Self {
+        self.http
+            .insert(url.to_string(), body.map(|b| HttpBody::new(b, content_length)));
         self
     }
 
@@ -211,7 +224,7 @@ impl Deps for FakeDeps {
         Ok(())
     }
 
-    fn http_get(&self, url: &str) -> Result<Vec<u8>, DepsError> {
+    fn http_get(&self, url: &str) -> Result<HttpBody, DepsError> {
         self.calls.borrow_mut().push(Call::HttpGet(url.to_string()));
         match self.http.get(url) {
             Some(Ok(b)) => Ok(b.clone()),

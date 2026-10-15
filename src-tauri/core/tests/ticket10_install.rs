@@ -13,7 +13,7 @@
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use llama_ctl_core::deps::{AppErrorKind, AppResult, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
+use llama_ctl_core::deps::{HttpBody, AppErrorKind, AppResult, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
 use llama_ctl_core::fake::{Call, FakeDeps};
 use llama_ctl_core::install::{
     DEFAULT_LLAMA_DIR, InstallEnv, InstallPaths, InstallResult, REFRESH_SENTINEL, STOPPED_STATE,
@@ -170,7 +170,7 @@ impl Deps for ScriptedSc<'_> {
     fn create_dir_all(&self, path: &Path) -> Result<(), DepsError> {
         self.inner.create_dir_all(path)
     }
-    fn http_get(&self, url: &str) -> Result<Vec<u8>, DepsError> {
+    fn http_get(&self, url: &str) -> Result<HttpBody, DepsError> {
         self.inner.http_get(url)
     }
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {

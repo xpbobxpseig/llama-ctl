@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
+use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, HttpBody, RegHive};
 
 /// Without this every `nssm` / `sc` / `powershell` call flashes a console
 /// window — which is why Python passed it to *every* command.
@@ -172,13 +172,23 @@ impl Deps for RealDeps {
         })
     }
 
-    fn http_get(&self, url: &str) -> Result<Vec<u8>, DepsError> {
+    fn http_get(&self, url: &str) -> Result<HttpBody, DepsError> {
         // GitHub rejects requests without a User-Agent.
         let resp = ureq::get(url)
             .header("User-Agent", "llama_ctl-updater/1.0")
             .call()
             .map_err(|e| DepsError::new(DepsErrorKind::Network, format!("{url}: {e}")))?;
-        read_body(resp.into_body())
+        // The declared length is what lets the UI show a percentage. Fall back
+        // to the received length when the server omitted it, so callers always
+        // have a denominator.
+        let content_length = resp
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+        let bytes = read_body(resp.into_body())?;
+        let len = content_length.unwrap_or(bytes.len() as u64);
+        Ok(HttpBody::new(bytes, Some(len)))
     }
 
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {

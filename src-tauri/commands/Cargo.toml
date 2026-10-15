@@ -1,0 +1,15 @@
+[package]
+name = "llama-ctl-commands"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+llama-ctl-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.154"
+
+[dev-dependencies]
+serde_json = "1.0.154"
+
+# The core crate is the settled domain layer (ticket 01-10); this crate only
+# composes it. Nothing here may edit `src-tauri/core/src`.

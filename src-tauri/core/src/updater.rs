@@ -324,7 +324,7 @@ fn http_text(d: &impl Deps, url: &str) -> Result<String, AppError> {
     let body = d
         .http_get(url)
         .map_err(|e| AppError::new(AppErrorKind::UpdateFailed, e.message))?;
-    Ok(String::from_utf8_lossy(&body).into_owned())
+    Ok(String::from_utf8_lossy(&body.bytes).into_owned())
 }
 
 /// Path part of a URL: drop scheme+host and anything from `?`/`#` on.
