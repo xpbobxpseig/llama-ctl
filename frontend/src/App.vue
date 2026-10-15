@@ -34,6 +34,7 @@ import { naiveOverrides, cssVars } from './theme/index.js'
 import * as store from './stores/snapshot.js'
 import * as theme from './stores/theme.js'
 import * as geo from './window/geometry.js'
+import { applyMotion } from './motion/index.js'
 import * as update from './stores/update.js'
 import * as ipc from './api/ipc.js'
 
@@ -53,6 +54,11 @@ const vars = computed(() => cssVars(mode.value))
 
 /** The master motion switch, applied as a class so CSS can zero every duration. */
 const motionOff = computed(() => theme.reducedMotion.value)
+
+// Ticket 16: push the switch to <html>. Rewriting the `--m-*` properties is
+// what makes teleported popovers (NaiveUI sends them to <body>) answer in no
+// time too; the class clamps anything that hardcodes a duration.
+watch(motionOff, (off) => applyMotion(!off), { immediate: true })
 
 const hasService = computed(() => store.services.value.length > 0)
 

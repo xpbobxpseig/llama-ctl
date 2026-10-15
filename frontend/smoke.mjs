@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tickets 12 & 13 smoke test — `cd frontend && npm run smoke`.
  *
  * Ticket 13's half (from "7 groups render" on) asserts the parameter form: the
@@ -138,9 +138,11 @@ const {
   SUBMIT_COPY,
   pt,
   autoBackupName,
+  // Ticket 16.
+  motion,
 } = window.__SMOKE__
 
-const text = window.document.getElementById('app').textContent
+const text = window.window.document.getElementById('app').textContent
 
 // ---- the shell renders, not a blank page -----------------------------------
 
@@ -246,7 +248,7 @@ console.log('ok  edits stay local; the snapshot stays authoritative')
 // ---- ticket 13: the parameter form -----------------------------------------
 
 // The seven groups render, in Rust's own order, and the first two start open.
-const groupEls = [...window.document.querySelectorAll('[data-group]')]
+const groupEls = [...window.window.document.querySelectorAll('[data-group]')]
 const renderedGroups = groupEls.map((el) => el.getAttribute('data-group'))
 assert.deepEqual(
   renderedGroups,
@@ -261,7 +263,7 @@ assert.deepEqual(
  */
 function openMap() {
   const out = {}
-  for (const el of window.document.querySelectorAll('[data-group]')) {
+  for (const el of window.window.document.querySelectorAll('[data-group]')) {
     const head = el.querySelector('button.head')
     out[el.getAttribute('data-group')] = head?.getAttribute('aria-expanded') === 'true'
   }
@@ -288,7 +290,7 @@ console.log('ok  7 groups render · first two expanded, the rest collapsed')
  * the right *component* was chosen, not merely that some widget is there.
  */
 function controlOf(key) {
-  const row = window.document.querySelector(`[data-field="${key}"]`)
+  const row = window.window.document.querySelector(`[data-field="${key}"]`)
   assert.ok(row, `row for ${key} renders`)
   return row
 }
@@ -409,7 +411,7 @@ function applySettings(patch) {
 
 // Toggle a group so the map is not the default any more: a state that merely
 // re-derives the default would pass by accident.
-window.document.querySelector('[data-group="高级"] button.head').click()
+window.window.document.querySelector('[data-group="高级"] button.head').click()
 await flush()
 const before = openMap()
 assert.equal(before['高级'], true, 'clicking a header expands it')
@@ -425,7 +427,7 @@ await flush()
 const afterLang = openMap()
 assert.deepEqual(afterLang, before, 'collapse state survives a language switch')
 // The switch really happened: the headings are translated now.
-const enHeadings = [...window.document.querySelectorAll('[data-group] button.head .title')].map(
+const enHeadings = [...window.window.document.querySelectorAll('[data-group] button.head .title')].map(
   (el) => el.textContent.trim(),
 )
 assert.ok(enHeadings.includes('Advanced'), `headings are English now: ${enHeadings}`)
@@ -548,7 +550,7 @@ await flush()
 assert.equal(store.values.value.ngl, '7', 'the edit is on screen')
 assert.equal(store.snapshot.snap.values.ngl, before2, 'the snapshot is untouched by it')
 assert.match(
-  window.document.querySelector('[data-field="ngl"] output.readout').textContent,
+  window.window.document.querySelector('[data-field="ngl"] output.readout').textContent,
   /7/,
   'the readout follows the edit',
 )
@@ -560,7 +562,7 @@ assert.equal(store.values.value.ngl, before2, 'clearing the form returns to the 
 
 /** The control the bar renders for one action. */
 function actionEl(name) {
-  const el = window.document.querySelector(`[data-action="${name}"]`)
+  const el = window.window.document.querySelector(`[data-action="${name}"]`)
   assert.ok(el, `the bar renders the ${name} control`)
   return el
 }
@@ -579,7 +581,7 @@ assert.ok(
   'Stop is live while RUNNING',
 )
 assert.equal(
-  window.document.querySelector('[data-action="autostart"] [role="switch"]')
+  window.window.document.querySelector('[data-action="autostart"] [role="switch"]')
     ?.getAttribute('aria-checked'),
   'true',
   'the auto-start switch is on because the snapshot says start = auto',
@@ -601,7 +603,7 @@ assert.deepEqual(
 )
 assert.ok(svcList.length > 1, 'more than one service, so switching is meaningful')
 assert.equal(
-  window.document.querySelector('.svcbar .n-base-selection-input__content').textContent,
+  window.window.document.querySelector('.svcbar .n-base-selection-input__content').textContent,
   'QwenLLM',
   'the select shows the service Rust selected',
 )
@@ -615,7 +617,7 @@ console.log(`ok  下拉列出全部 ${svcList.length} 个 NSSM 服务`)
 
 // ---- the status dot is vector, not a font glyph ----------------------------
 
-const dot = window.document.querySelector('.status svg.dot')
+const dot = window.window.document.querySelector('.status svg.dot')
 assert.ok(dot, 'the status dot renders as an <svg> element')
 // The bug this replaces: Python drew the dot with `text="●"`, whose ink came
 // from the font's metrics (13x23px at a 13px font size) and therefore drifted
@@ -625,7 +627,7 @@ assert.equal(dot.getAttribute('viewBox'), '0 0 12 12', 'the dot has a fixed user
 assert.equal(dot.getAttribute('width'), '12', 'the dot has an explicit width')
 assert.equal(dot.getAttribute('height'), '12', 'the dot has an explicit height')
 assert.equal(
-  window.document.querySelectorAll('.status svg.dot circle').length,
+  window.window.document.querySelectorAll('.status svg.dot circle').length,
   2,
   'the dot is drawn from circles (core + halo), not from a character',
 )
@@ -642,7 +644,7 @@ store.setSnapshot({
 })
 await flush()
 assert.ok(
-  !window.document.querySelector('.status svg.dot').classList.contains('is-breathing'),
+  !window.window.document.querySelector('.status svg.dot').classList.contains('is-breathing'),
   'the dot stops breathing when the service is not RUNNING',
 )
 store.setSnapshot({
@@ -656,13 +658,13 @@ console.log('ok  状态圆点是内联 SVG（非字体字符）· RUNNING 呼吸
 
 /** Is a confirmation on screen, and which one? */
 function confirmKind() {
-  const el = window.document.querySelector('[data-confirm-kind]')
+  const el = window.window.document.querySelector('[data-confirm-kind]')
   return el ? el.getAttribute('data-confirm-kind') : null
 }
 
 /** The dialog's two buttons, in NaiveUI's own order: [cancel, confirm]. */
 function confirmButtons() {
-  const el = window.document.querySelector('[data-confirm-kind]')
+  const el = window.window.document.querySelector('[data-confirm-kind]')
   return el ? [...el.querySelectorAll('.n-dialog__action button')] : []
 }
 
@@ -679,7 +681,7 @@ assert.equal(store.busyName.value, '', 'nothing was sent to Rust while the quest
 // assertion is built from the very copy the component is about to render.
 const restartQuestion = ct('msg.restart.confirm', { s: store.selected.value })
 assert.match(
-  window.document.querySelector('[data-confirm-kind]').textContent,
+  window.window.document.querySelector('[data-confirm-kind]').textContent,
   new RegExp(restartQuestion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   `the restart question is the one the bar was about to act on: ${restartQuestion}`,
 )
@@ -700,7 +702,7 @@ console.log('ok  重启先二次确认 · 取消即不执行')
 // snapshot, so a click opens the question and leaves the switch where Rust put
 // it — which is what makes "cancel writes nothing" true by construction.
 const startBefore = store.snapshot.snap.facts.start
-window.document.querySelector('[data-action="autostart"] [role="switch"]').click()
+window.window.document.querySelector('[data-action="autostart"] [role="switch"]').click()
 await flush()
 assert.equal(confirmKind(), 'autostart', '开机自启 asks before it writes')
 assert.equal(
@@ -709,13 +711,13 @@ assert.equal(
   'the start mode is unchanged while the question is open — nothing was written',
 )
 assert.equal(
-  window.document.querySelector('[data-action="autostart"] [role="switch"]').getAttribute('aria-checked'),
+  window.window.document.querySelector('[data-action="autostart"] [role="switch"]').getAttribute('aria-checked'),
   'true',
   'the switch still shows what Rust last read, not what was clicked',
 )
 const autoQuestion = ct('msg.auto.confirm', { m: store.t(`boot.${store.snapshot.snap.facts.start === 'auto' ? 'manual' : 'auto'}`) })
 assert.match(
-  window.document.querySelector('[data-confirm-kind]').textContent,
+  window.window.document.querySelector('[data-confirm-kind]').textContent,
   new RegExp(autoQuestion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   `the question is the mode it would write: ${autoQuestion}`,
 )
@@ -731,7 +733,7 @@ console.log('ok  开机自启先二次确认 · 取消即不写入')
 
 // ---- the log region collapses ----------------------------------------------
 
-const log = window.document.querySelector('[data-log-open]')
+const log = window.window.document.querySelector('[data-log-open]')
 assert.ok(log, 'the log tail renders')
 assert.equal(log.getAttribute('data-log-open'), 'false', 'the log starts folded, as Python did')
 const logHead = log.querySelector('button.head')
@@ -810,14 +812,14 @@ console.log(`ok  ${Object.keys(CONTROL_COPY).length} 条控制条文案可翻译
  * destination, and the update section lives in its bottom slot. Switching is
  * the shell's own button, so the click here is the real one.
  */
-const settingsBtn = [...window.document.querySelectorAll('header .actions button')].find((b) =>
+const settingsBtn = [...window.window.document.querySelectorAll('header .actions button')].find((b) =>
   /设置|Settings/.test(b.textContent),
 )
 assert.ok(settingsBtn, 'the shell offers a 设置/Settings button')
 settingsBtn.click()
 await flush()
 
-const upd = window.document.querySelector('[data-update-section]')
+const upd = window.window.document.querySelector('[data-update-section]')
 assert.ok(upd, 'the update section renders in the settings page')
 assert.match(upd.textContent, /官方更新/, "the section is titled by Rust's copy")
 console.log('ok  设置页就位 · 官方更新区渲染')
@@ -826,7 +828,7 @@ console.log('ok  设置页就位 · 官方更新区渲染')
 
 /** The control with this id, which must be a NaiveUI select. */
 function selectOf(id) {
-  const el = window.document.querySelector(`#${id}`)
+  const el = window.window.document.querySelector(`#${id}`)
   assert.ok(el, `#${id} renders`)
   const box = el.querySelector('.n-base-selection') ?? el.closest('.n-base-selection')
   assert.ok(box, `#${id} renders a select`)
@@ -837,7 +839,7 @@ const langBox = selectOf('set-lang')
 const appearBox = selectOf('set-appear')
 assert.ok(selectOf('upd-channel'), 'the build-variant selector renders')
 assert.ok(
-  window.document.querySelector('[data-update-auto] [role="switch"]'),
+  window.window.document.querySelector('[data-update-auto] [role="switch"]'),
   'the startup-check switch renders',
 )
 
@@ -943,12 +945,12 @@ assert.match(upd.textContent, /还未检查过更新/, 'and it says so')
 update.setChecked(demoUpdateCheck({ installed: null }))
 await flush()
 assert.equal(
-  window.document.querySelector('[data-update-status]').getAttribute('data-update-status'),
+  window.window.document.querySelector('[data-update-status]').getAttribute('data-update-status'),
   'unknown',
   'an unreadable llama-server.exe is the「未知」case',
 )
 assert.match(
-  window.document.querySelector('[data-update-status]').textContent,
+  window.window.document.querySelector('[data-update-status]').textContent,
   /当前版本未知（无法读取 llama-server\.exe）/,
   'and it says why, not a build number',
 )
@@ -956,7 +958,7 @@ assert.match(
 // A readable one: 当前：b10813 · 最新：b10819.
 update.setChecked(demoUpdateCheck())
 await flush()
-const statusEl = window.document.querySelector('[data-update-status]')
+const statusEl = window.window.document.querySelector('[data-update-status]')
 assert.equal(statusEl.getAttribute('data-update-status'), 'known', 'a readable build is the「已知」case')
 assert.match(statusEl.textContent, /当前：b10813/, 'the installed build is shown as b10813')
 assert.match(statusEl.textContent, /最新：b10819/, 'the latest official tag is shown too')
@@ -1005,7 +1007,7 @@ console.log('ok  启动自动检查只提示：发出 check_update，绝不 inst
 update.reset()
 await update.check()
 await flush()
-const notes = window.document.querySelector('[data-notes-kind]')
+const notes = window.window.document.querySelector('[data-notes-kind]')
 assert.ok(notes, 'a release opens the notes before anything else happens')
 assert.match(notes.textContent, /更新日志/, 'the notes are labelled 更新日志')
 // Nightlies ship no release notes; Rust's `upd.no.changelog` says so and names
@@ -1025,7 +1027,7 @@ console.log('ok  更新日志先于决策展示 · nightly 无说明时如实说
 
 /** Which question is on screen, `null` for none. */
 function installAsk() {
-  const el = window.document.querySelector('[data-confirm-kind]')
+  const el = window.window.document.querySelector('[data-confirm-kind]')
   return el ? el.getAttribute('data-confirm-kind') : null
 }
 
@@ -1033,7 +1035,7 @@ assert.equal(installAsk(), null, 'no confirmation at rest')
 sent = Array.from(ipc.calls).length
 
 // The notes'「立即更新」is not an install — it is the second question.
-window.document.querySelector('[data-notes-action="install"]').click()
+window.window.document.querySelector('[data-notes-action="install"]').click()
 await flush()
 assert.equal(installAsk(), 'update', '更新 asks; it does not install')
 assert.deepEqual(
@@ -1044,13 +1046,13 @@ assert.deepEqual(
 
 // The question names the service and the backup directory — the ticket's own
 // requirement, and the reason this dialog exists at all.
-const question = window.document.querySelector('[data-confirm-kind]').textContent
+const question = window.window.document.querySelector('[data-confirm-kind]').textContent
 assert.match(question, /QwenLLM/, 'the question names the service being stopped')
 assert.match(question, /旧文件会备份到/, 'the question says the old files are backed up')
 assert.match(question, /F:\\llama_ctl\\backup\\b10819/, 'and it shows where')
 // Two ways out, and both are visible.
 const buttons = [
-  ...window.document.querySelectorAll('[data-confirm-kind] .n-dialog__action button'),
+  ...window.window.document.querySelectorAll('[data-confirm-kind] .n-dialog__action button'),
 ]
 assert.equal(buttons.length, 2, 'the confirmation offers exactly two answers')
 assert.equal(buttons[0].textContent.trim(), ut('btn.cancel'), 'the first is 取消/Cancel')
@@ -1071,7 +1073,7 @@ console.log('ok  立即更新先二次确认（含备份目录）· 取消即不
 
 /** The transcript as the DOM has it: count and lines, in order. */
 function progressDom() {
-  const el = window.document.querySelector('[data-progress-count]')
+  const el = window.window.document.querySelector('[data-progress-count]')
   assert.ok(el, 'the progress transcript renders')
   return {
     el,
@@ -1087,17 +1089,17 @@ assert.match(
   'and the placeholder says a line will appear',
 )
 // Answer the question for real this time.
-window.document.querySelector('[data-notes-action="install"]').click()
+window.window.document.querySelector('[data-notes-action="install"]').click()
 await flush()
 assert.equal(installAsk(), 'update', 'the question is back')
-window.document.querySelectorAll('[data-confirm-kind] .n-dialog__action button')[1].click()
+window.window.document.querySelectorAll('[data-confirm-kind] .n-dialog__action button')[1].click()
 
 // Sample the transcript while it fills: a streaming render passes through
 // several intermediate counts, a batch render at the end shows 0 then 9.
 const counts = []
 for (let i = 0; i < 500; i++) {
   await new Promise((r) => setTimeout(r, 2))
-  const el = window.document.querySelector('[data-progress-count]')
+  const el = window.window.document.querySelector('[data-progress-count]')
   counts.push(Number(el.getAttribute('data-progress-count')))
   if (el.getAttribute('data-progress-running') === 'false' && counts[counts.length - 1] === INSTALL_LINES.length) {
     break
@@ -1143,7 +1145,7 @@ assert.equal(chanCall.args.settings.upd_channel, 'win-cpu-x64', 'and it carries 
 assert.equal(update.release.value, null, 'changing the variant drops the release that was checked')
 assert.equal(update.canInstall.value, false, 'so 立即更新 cannot install something never shown')
 assert.ok(
-  window.document.querySelector('[data-update-action="install"]').closest('button').disabled === true,
+  window.window.document.querySelector('[data-update-action="install"]').closest('button').disabled === true,
   'the install button is disabled until the variant is re-checked',
 )
 console.log('ok  切换构建线即失效旧检查 · 更新按钮随之禁用（不会装没看过的版本）')
@@ -1157,7 +1159,7 @@ const autoCall = Array.from(ipc.calls).slice(sent).find((c) => c.cmd === 'save_s
 assert.equal(autoCall.args.settings.upd_check_on_startup, false, 'the preference went through save_settings')
 assert.equal(update.autoOnStartup.value, false, 'and the store holds what Rust read back')
 assert.equal(
-  window.document.querySelector('[data-update-auto] [role="switch"]').getAttribute('aria-checked'),
+  window.window.document.querySelector('[data-update-auto] [role="switch"]').getAttribute('aria-checked'),
   'false',
   'the switch follows it',
 )
@@ -1185,14 +1187,14 @@ console.log(`ok  ${Object.keys(UPDATE_COPY).length} 条更新区文案可翻译 
  * in the console view, so the shell's own 设置 button takes us back — the same
  * route a user takes, rather than poking the view switcher.
  */
-const backBtn = [...window.document.querySelectorAll('header .actions button')].find((b) =>
+const backBtn = [...window.window.document.querySelectorAll('header .actions button')].find((b) =>
   /设置|Settings/.test(b.textContent),
 )
 assert.ok(backBtn, 'the shell offers a way back to the console')
 backBtn.click()
 await flush()
 
-const bar = window.document.querySelector('[data-preset-bar]')
+const bar = window.window.document.querySelector('[data-preset-bar]')
 assert.ok(bar, 'the preset / submit row renders')
 
 /** Rust's verdict, pushed into the store the way a Snapshot push would. */
@@ -1203,14 +1205,14 @@ function setDirty(next) {
 
 /** The button the row renders for one action. */
 function submitBtn(name) {
-  const el = window.document.querySelector(`[data-action="${name}"]`)
+  const el = window.window.document.querySelector(`[data-action="${name}"]`)
   assert.ok(el, `the row renders the ${name} control`)
   return el.closest('button')
 }
 
 /** Is the unapplied-changes hint on screen? */
 function dirtyHint() {
-  return window.document.querySelector('[data-dirty-hint]')
+  return window.window.document.querySelector('[data-dirty-hint]')
 }
 
 /** Escape one string into a regex, for asserting on rendered copy. */
@@ -1271,7 +1273,7 @@ assert.equal(
   'and no write went over IPC',
 )
 
-const ask = window.document.querySelector('[data-confirm-kind]')
+const ask = window.window.document.querySelector('[data-confirm-kind]')
 assert.match(ask.textContent, re(store.selected.value), 'the question names the service')
 // Old vs new, per field: the old side is Rust's own parse of the service.
 const diff = ask.querySelector('[data-diff-row="ngl"]')
@@ -1321,7 +1323,7 @@ submitBtn('preset-del').click()
 await flush()
 assert.equal(confirmKind(), 'preset-del', '删除预设 asks first')
 assert.match(
-  window.document.querySelector('[data-confirm-kind]').textContent,
+  window.window.document.querySelector('[data-confirm-kind]').textContent,
   re(pt('msg.preset.del', { n: '7B 快速' })),
   'and the question names the preset',
 )
@@ -1347,11 +1349,11 @@ const held = store.selected.value
 askGuard('service', 'QwenVL')
 await flush()
 assert.equal(confirmKind(), 'service', 'switching service with unapplied changes asks first')
-const guardText = window.document.querySelector('[data-confirm-kind]').textContent
+const guardText = window.window.document.querySelector('[data-confirm-kind]').textContent
 assert.match(guardText, /QwenVL/, 'the question names the target')
 assert.match(guardText, re(pt('msg.svc.dirty')), 'and says what would be lost')
 assert.ok(
-  window.document.querySelector('[data-guard-discard="service"]'),
+  window.window.document.querySelector('[data-guard-discard="service"]'),
   'it offers continuing without a backup',
 )
 assert.equal(store.selected.value, held, 'the service has not moved while the question is open')
@@ -1371,7 +1373,7 @@ askGuard('preset', '32B 长上下文')
 await flush()
 assert.equal(confirmKind(), 'preset', '载入预设 with unapplied changes asks too')
 assert.match(
-  window.document.querySelector('[data-confirm-kind]').textContent,
+  window.window.document.querySelector('[data-confirm-kind]').textContent,
   re(pt('msg.preset.dirty')),
   'and it is the preset question, not the service one',
 )
@@ -1398,11 +1400,68 @@ assert.match(
 )
 console.log(`ok  ${Object.keys(SUBMIT_COPY).length} 条提交区文案可翻译 · 自动备份名带时间戳`)
 
+// ---- ticket 16: the motion switch ------------------------------------------
+
+const DURATIONS = Object.keys(motion.DURATION_VARS)
+assert.ok(DURATIONS.length >= 5, `several durations are switchable: ${DURATIONS.join(' ')}`)
+
+// Off zeroes every duration, but leaves thresholds and easings alone: turning
+// the 300 ms hover threshold off would make the「?」fire on every pass across
+// the form, which is the opposite of what the switch promises.
+const onVars = motion.motionVars(true)
+const offVars = motion.motionVars(false)
+for (const v of DURATIONS) {
+  assert.notEqual(onVars[v], offVars[v], `${v} changes with the switch`)
+  assert.ok(/^0\./.test(offVars[v]), `${v} is effectively instant when off: ${offVars[v]}`)
+}
+for (const v of Object.keys(motion.THRESHOLD_VARS)) {
+  assert.equal(onVars[v], offVars[v], `${v} is a threshold, not an animation`)
+}
+for (const v of Object.keys(motion.EASE_VARS)) {
+  assert.equal(onVars[v], offVars[v], `${v} is a curve, not a duration`)
+}
+
+// The「?」timings come from one place, so the stylesheet and the JS timer
+// cannot drift apart.
+assert.equal(motion.HELP.delay, 300, 'hover threshold is 300 ms')
+assert.equal(motion.HELP.in, 200, 'fade in is 200 ms')
+assert.equal(motion.HELP.out, 800, 'fade out is 800 ms')
+assert.deepEqual(
+  [motion.HELP.delay, motion.HELP.in, motion.HELP.out],
+  [motion.MS.TIP_DELAY, motion.MS.TIP_IN, motion.MS.TIP_OUT],
+  'the timings are parsed out of MOTION, not restated',
+)
+
+// Applying the switch must not disable anything: every control is still there.
+motion.applyMotion(false)
+await flush()
+assert.ok(
+  window.window.document.documentElement.classList.contains(motion.OFF_CLASS),
+  'the off class lands on <html>, so teleported popovers answer too',
+)
+assert.equal(
+  window.window.document.documentElement.style.getPropertyValue('--m-hover-in'),
+  motion.INSTANT,
+  'the property is rewritten, not just the class',
+)
+assert.ok(
+  window.window.document.querySelectorAll('button, input, [role="switch"]').length > 0,
+  'nothing disappears when motion is off',
+)
+assert.ok(
+  window.window.document.querySelectorAll('[aria-label$="— 说明"]').length >= 28,
+  'every「?」is still reachable with motion off',
+)
+motion.applyMotion(true)
+await flush()
+assert.ok(!window.document.documentElement.classList.contains(motion.OFF_CLASS), 'the switch turns back on')
+console.log('ok  动效总开关：时长归零但功能不缺失 · 阈值与曲线不受影响 ·「?」时序单一来源')
+
 // ---- no console noise ------------------------------------------------------
 
 const noise = warnings.filter((w) => !/Could not parse CSS|Not implemented/.test(w))
 assert.deepEqual(noise, [], `the console stayed clean:\n${noise.join('\n')}`)
 console.log('ok  no runtime errors or Vue warnings')
 
-console.log('\nall ticket 12 + 13 + 14 + 15 + 17 smoke checks passed')
+console.log('\nall ticket 12 + 13 + 14 + 15 + 16 + 17 smoke checks passed')
 dom.window.close()

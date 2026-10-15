@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The one source of truth for the app's design tokens (ticket 12).
  *
  * NaiveUI is used for *components only* — slider, select, modal, popover —
@@ -100,6 +100,11 @@ export const MOTION = {
   HOVER_IN: '100ms', // button reaches its highlight and stays
   HOVER_OUT: '800ms', // exponential-feeling decay back to rest
   ENTER: '260ms', // card / view entrance
+  // The「?」tip. 300 ms is an anti-mistouch threshold, not an animation: a
+  // quick pass across the form must not fire it (llama_ctl_gui.py L516).
+  TIP_DELAY: '300ms',
+  TIP_IN: '200ms',
+  TIP_OUT: '800ms',
   EASE_OUT: 'cubic-bezier(0.22, 1, 0.36, 1)', // spring-like, no overshoot
   EASE_DECAY: 'cubic-bezier(0.4, 0, 0.2, 1)',
 }
@@ -487,6 +492,11 @@ export function cssVars(mode) {
     '--m-enter': MOTION.ENTER,
     '--m-ease-out': MOTION.EASE_OUT,
     '--m-ease-decay': MOTION.EASE_DECAY,
+    // The「?」timings. Exported here too, so the stylesheet and the JS timer
+    // read the same number (src/motion/index.js parses them back out).
+    '--m-tip-delay': MOTION.TIP_DELAY,
+    '--m-tip-in': MOTION.TIP_IN,
+    '--m-tip-out': MOTION.TIP_OUT,
   }
 }
 

@@ -1,3 +1,4 @@
+﻿import * as motion from './src/motion/index.js'
 /**
  * Smoke entry — bundled and run inside jsdom by `smoke.mjs`.
  *
@@ -219,4 +220,6 @@ window.__SMOKE__ = {
   pt,
   autoBackupName,
   ipc,
+  ipc,
+  motion,
 }

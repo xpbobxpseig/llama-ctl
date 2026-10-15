@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 /**
  * The「?」affordance: one button per parameter, opening the Chinese
  * explanation of what the parameter does.
@@ -14,7 +14,13 @@
  * `NPopover`, so it reads the same type scale as the rest of the card.
  */
 import { NPopover } from 'naive-ui'
+import { useHelpTip } from '../motion/index.js'
 
+// The「?」timings live in one place (src/motion/index.js): 300 ms hover before
+// it appears, 200 ms fade in, 800 ms fade out that shortens the further the
+// pointer gets. Click still opens it, so a deliberate click is never gated by
+// the hover threshold.
+const tip = useHelpTip()
 defineProps({
   /** The explanation, already resolved. */
   text: { type: String, default: '' },
@@ -30,11 +36,22 @@ defineProps({
     class="help"
     placement="top-start"
     :width="360"
-    trigger="click"
+    :trigger="manual"
+    :show="tip.shown.value"
     :show-arrow="true"
   >
     <template #trigger>
-      <button type="button" class="q" :aria-label="`${label} — 说明`">?</button>
+      <button
+        type="button"
+        class="q"
+        :aria-label="`${label} — 说明`"
+        :style="tip.fade.value"
+        @mouseenter="tip.enter"
+        @mouseleave="tip.leave"
+        @focus="tip.focus"
+        @blur="tip.blur"
+        @click="tip.enter"
+      >?</button>
     </template>
 
     <div class="body">
