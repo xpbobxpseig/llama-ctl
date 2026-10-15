@@ -62,7 +62,14 @@ function onShow(next) {
     @update:show="onShow"
     @positive-click="emit('confirm')"
     @negative-click="emit('cancel')"
-  />
+  >
+    <!--
+      The body. A caller that needs more than one line of copy — ticket 17's
+      old-vs-new comparison — passes it as the default slot; NaiveUI's dialog
+      prefers the slot over `content`, so the two never both render.
+    -->
+    <slot>{{ message }}</slot>
+  </NModal>
 </template>
 
 <style scoped>

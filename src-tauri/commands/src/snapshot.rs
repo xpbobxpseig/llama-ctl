@@ -84,7 +84,9 @@ pub struct Snapshot {
     pub facts: Option<FactsView>,
     /// `sc query` state plus the health verdict.
     pub status: Status,
-    /// Parsed from `AppParameters` — the **authoritative** form values.
+    /// The form values the UI should show: the user's in-progress edits when
+    /// the caller passed them, else the parse of `AppParameters`. Returning the
+    /// form is what lets `load_preset` actually fill the form.
     pub values: BTreeMap<String, String>,
     /// Tokens of `AppParameters` no field claims; re-emitted verbatim.
     pub extras: Vec<String>,
@@ -285,7 +287,10 @@ pub fn snapshot(
         selected,
         facts,
         status,
-        values,
+        // The form, not the service's own parse: `editing` is what the user is
+        // looking at, and it must survive a round trip — otherwise loading a
+        // preset would fill the form with the service's values instead.
+        values: form,
         extras,
         warnings,
         preset_loaded: app.preset_loaded.clone(),

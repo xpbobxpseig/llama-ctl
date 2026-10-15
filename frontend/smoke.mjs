@@ -118,6 +118,26 @@ const {
   ConfirmDialog,
   CONTROL_COPY,
   ct,
+  // Ticket 15.
+  UpdateSection,
+  ReleaseNotes,
+  UpdateProgress,
+  UPDATE_COPY,
+  ut,
+  update,
+  demoUpdateCheck,
+  EVENT_UPDATE,
+  INSTALL_LINES,
+  ipc,
+  // Ticket 17.
+  PresetBar,
+  ParamDiff,
+  GuardDialog,
+  askGuard,
+  closeGuard,
+  SUBMIT_COPY,
+  pt,
+  autoBackupName,
 } = window.__SMOKE__
 
 const text = window.document.getElementById('app').textContent
@@ -783,11 +803,606 @@ assert.match(
 )
 console.log(`ok  ${Object.keys(CONTROL_COPY).length} 条控制条文案可翻译 · 占位符已填充`)
 
+// ---- ticket 15: the settings page ----------------------------------------
+
+/**
+ * The app boots to the console view; the settings page is the other
+ * destination, and the update section lives in its bottom slot. Switching is
+ * the shell's own button, so the click here is the real one.
+ */
+const settingsBtn = [...window.document.querySelectorAll('header .actions button')].find((b) =>
+  /设置|Settings/.test(b.textContent),
+)
+assert.ok(settingsBtn, 'the shell offers a 设置/Settings button')
+settingsBtn.click()
+await flush()
+
+const upd = window.document.querySelector('[data-update-section]')
+assert.ok(upd, 'the update section renders in the settings page')
+assert.match(upd.textContent, /官方更新/, "the section is titled by Rust's copy")
+console.log('ok  设置页就位 · 官方更新区渲染')
+
+// ---- language / appearance exist and persist through save_settings --------
+
+/** The control with this id, which must be a NaiveUI select. */
+function selectOf(id) {
+  const el = window.document.querySelector(`#${id}`)
+  assert.ok(el, `#${id} renders`)
+  const box = el.querySelector('.n-base-selection') ?? el.closest('.n-base-selection')
+  assert.ok(box, `#${id} renders a select`)
+  return box
+}
+
+const langBox = selectOf('set-lang')
+const appearBox = selectOf('set-appear')
+assert.ok(selectOf('upd-channel'), 'the build-variant selector renders')
+assert.ok(
+  window.document.querySelector('[data-update-auto] [role="switch"]'),
+  'the startup-check switch renders',
+)
+
+/**
+ * The rendered value of a NaiveUI select. Reading it off the DOM is what makes
+ * "the control shows what Rust persisted" a real assertion: the menus need a
+ * layout engine to open, so the closed label is the only observable.
+ */
+function shownValue(box) {
+  const el = box.querySelector('.n-base-selection-input__content')
+  return el ? el.textContent.trim() : ''
+}
+
+assert.equal(
+  shownValue(langBox),
+  store.settings.value.language === 'zh' ? '中文' : 'English',
+  `the language control shows the language Rust persisted: ${shownValue(langBox)}`,
+)
+
+/** How many commands have gone out so far. */
+let sent = Array.from(ipc.calls).length
+
+// A language change: the control's own handler, answered by Rust.
+assert.ok(await theme.setLanguage('en'), 'save_settings answered for the language')
+await flush()
+const langCall = Array.from(ipc.calls).slice(sent).find((c) => c.cmd === 'save_settings')
+assert.ok(langCall, 'the language went through save_settings, not a local write')
+assert.equal(langCall.args.settings.language, 'en', 'and it carries the new language')
+assert.equal(store.settings.value.language, 'en', 'the store holds what Rust read back')
+assert.equal(shownValue(langBox), 'English', "the control follows Rust's answer")
+
+// An appearance change, the same way.
+sent = Array.from(ipc.calls).length
+assert.ok(await theme.setAppearance('dark'), 'save_settings answered for the appearance')
+await flush()
+const appearCall = Array.from(ipc.calls).slice(sent).find((c) => c.cmd === 'save_settings')
+assert.ok(appearCall, 'the appearance went through save_settings')
+assert.equal(appearCall.args.settings.appearance, 'dark', 'and it carries the new appearance')
+assert.equal(theme.mode.value, 'dark', 'the appearance really changed')
+assert.equal(shownValue(appearBox), '深色', 'and the control shows it')
+console.log('ok  语言 / 外观 控件就位 · 变更经 save_settings 并以 Rust 回读为准')
+
+// ---- the variant selector lists Rust's own channels ----------------------
+
+const shownChannels = Array.from(update.channels.value).map((c) => ({
+  value: c.value,
+  label: c.label,
+}))
+const snapChannels = Array.from(store.snapshot.snap.channels).map(([id, label]) => ({
+  value: id,
+  label,
+}))
+assert.deepEqual(
+  shownChannels,
+  snapChannels,
+  `the selector is built from Snapshot.channels, not a list of its own: ${JSON.stringify(shownChannels)}`,
+)
+assert.equal(shownChannels.length, 4, `four build variants: ${shownChannels.length}`)
+for (const c of shownChannels) {
+  assert.match(c.value, /^win-/, `${c.value} is a channel id`)
+  assert.match(c.label, /\S/, `${c.value} has a label`)
+}
+assert.equal(
+  shownValue(selectOf('upd-channel')),
+  shownChannels.find((c) => c.value === store.settings.value.upd_channel).label,
+  'the selector shows the variant Rust persisted',
+)
+
+/**
+ * `updater::channels()` is Rust's list, diffed here for the same reason
+ * ticket 13 diffs `fields.rs`: a fifth variant added there must appear in the
+ * dropdown rather than silently dropping out of it.
+ */
+const UPDATER = resolve('..', 'src-tauri', 'core', 'src', 'updater.rs')
+const updaterSrc = existsSync(UPDATER) ? readFileSync(UPDATER, 'utf8') : ''
+if (updaterSrc) {
+  const idBlock = updaterSrc.match(/pub fn id\(self\)[\s\S]*?\n\s{4}\}/)?.[0] ?? ''
+  const rustIds = [...idBlock.matchAll(/"([^"]+)"/g)].map((m) => m[1])
+  assert.ok(rustIds.length > 0, "Rust's channel ids were read")
+  assert.deepEqual(
+    shownChannels.map((c) => c.value),
+    rustIds,
+    `the selector lists Rust's channels, id for id: ${JSON.stringify(rustIds)}`,
+  )
+  console.log(`ok  构建线选择器列出 Rust 的 ${rustIds.length} 条 channels（与 updater.rs 一致）`)
+} else {
+  console.log('ok  (src-tauri not present — skipped the channel cross-check against Rust)')
+}
+
+// ---- installed build: 未知 is not a build number -------------------------
+
+// The boot check has already run by now (that is what it is for), so the
+// "never checked" state is asserted after an explicit reset.
+update.reset()
+await flush()
+assert.equal(
+  upd.querySelector('[data-update-status]').getAttribute('data-update-status'),
+  'none',
+)
+assert.match(upd.textContent, /还未检查过更新/, 'and it says so')
+
+// Rust's answer for an unreadable llama-server.exe.
+update.setChecked(demoUpdateCheck({ installed: null }))
+await flush()
+assert.equal(
+  window.document.querySelector('[data-update-status]').getAttribute('data-update-status'),
+  'unknown',
+  'an unreadable llama-server.exe is the「未知」case',
+)
+assert.match(
+  window.document.querySelector('[data-update-status]').textContent,
+  /当前版本未知（无法读取 llama-server\.exe）/,
+  'and it says why, not a build number',
+)
+
+// A readable one: 当前：b10813 · 最新：b10819.
+update.setChecked(demoUpdateCheck())
+await flush()
+const statusEl = window.document.querySelector('[data-update-status]')
+assert.equal(statusEl.getAttribute('data-update-status'), 'known', 'a readable build is the「已知」case')
+assert.match(statusEl.textContent, /当前：b10813/, 'the installed build is shown as b10813')
+assert.match(statusEl.textContent, /最新：b10819/, 'the latest official tag is shown too')
+console.log('ok  当前版本四态齐全：未知 ≠ 已知 ≠ 未检查 · 读不到时显示「未知」')
+
+// ---- 立即检查 never installs ---------------------------------------------
+
+update.reset()
+await flush()
+sent = Array.from(ipc.calls).length
+const checked = await update.check()
+await flush()
+assert.ok(checked, 'the check answered')
+assert.equal(checked.installed, 10813, 'and Rust reported the installed build')
+assert.equal(checked.up_to_date, false, 'and that b10813 is behind b10819')
+const sinceCheck = Array.from(ipc.calls).slice(sent).map((c) => c.cmd)
+assert.ok(sinceCheck.includes('check_update'), `检查 sent check_update: ${sinceCheck}`)
+assert.ok(!sinceCheck.includes('install_update'), `检查 never installs: ${sinceCheck}`)
+console.log('ok  立即检查只检查：check_update 发出，install_update 从未发出')
+
+// ---- the startup auto-check only prompts ---------------------------------
+
+// The double is installed before the app mounts, so the boot check in
+// `App.vue` already ran once. `resetAutoCheck` lets the assertion exercise the
+// same path again, from the top.
+update.resetAutoCheck()
+sent = Array.from(ipc.calls).length
+await update.autoCheck()
+await flush()
+const autoCmds = Array.from(ipc.calls).slice(sent).map((c) => c.cmd)
+assert.ok(autoCmds.includes('check_update'), `the startup check ran: ${autoCmds}`)
+assert.ok(!autoCmds.includes('install_update'), `the startup check only prompts: ${autoCmds}`)
+assert.equal(update.autoChecked.value, true, 'and it is marked done for this session')
+sent = Array.from(ipc.calls).length
+await update.autoCheck()
+await flush()
+assert.deepEqual(
+  Array.from(ipc.calls).slice(sent).map((c) => c.cmd),
+  [],
+  'a second startup check does not run',
+)
+console.log('ok  启动自动检查只提示：发出 check_update，绝不 install_update，且只跑一次')
+
+// ---- the changelog comes before the decision -----------------------------
+
+update.reset()
+await update.check()
+await flush()
+const notes = window.document.querySelector('[data-notes-kind]')
+assert.ok(notes, 'a release opens the notes before anything else happens')
+assert.match(notes.textContent, /更新日志/, 'the notes are labelled 更新日志')
+// Nightlies ship no release notes; Rust's `upd.no.changelog` says so and names
+// the tag and build rather than showing an empty pane.
+assert.match(
+  notes.textContent,
+  /官方 nightly 构建不提供更新说明/,
+  'the honest "no notes" copy shows, not a blank pane',
+)
+assert.match(notes.textContent, /b10819/, 'and it names the build being offered')
+assert.match(notes.textContent, /llama-b10819-bin/, 'and the assets it would fetch')
+// ADR-0001: no URL anywhere in the notes — only names.
+assert.doesNotMatch(notes.textContent, /https?:\/\//, 'the notes carry no link')
+console.log('ok  更新日志先于决策展示 · nightly 无说明时如实说明并给出构建号与资产名')
+
+// ---- 立即更新 asks, twice -------------------------------------------------
+
+/** Which question is on screen, `null` for none. */
+function installAsk() {
+  const el = window.document.querySelector('[data-confirm-kind]')
+  return el ? el.getAttribute('data-confirm-kind') : null
+}
+
+assert.equal(installAsk(), null, 'no confirmation at rest')
+sent = Array.from(ipc.calls).length
+
+// The notes'「立即更新」is not an install — it is the second question.
+window.document.querySelector('[data-notes-action="install"]').click()
+await flush()
+assert.equal(installAsk(), 'update', '更新 asks; it does not install')
+assert.deepEqual(
+  Array.from(ipc.calls).slice(sent).map((c) => c.cmd),
+  [],
+  'nothing was sent to Rust while the question is open',
+)
+
+// The question names the service and the backup directory — the ticket's own
+// requirement, and the reason this dialog exists at all.
+const question = window.document.querySelector('[data-confirm-kind]').textContent
+assert.match(question, /QwenLLM/, 'the question names the service being stopped')
+assert.match(question, /旧文件会备份到/, 'the question says the old files are backed up')
+assert.match(question, /F:\\llama_ctl\\backup\\b10819/, 'and it shows where')
+// Two ways out, and both are visible.
+const buttons = [
+  ...window.document.querySelectorAll('[data-confirm-kind] .n-dialog__action button'),
+]
+assert.equal(buttons.length, 2, 'the confirmation offers exactly two answers')
+assert.equal(buttons[0].textContent.trim(), ut('btn.cancel'), 'the first is 取消/Cancel')
+assert.equal(buttons[1].textContent.trim(), store.t('upd.install'), 'the second is 立即更新')
+
+// Cancel: the question closes and nothing at all happened.
+buttons[0].click()
+await flush()
+assert.equal(installAsk(), null, '取消 closes the question')
+assert.deepEqual(
+  Array.from(ipc.calls).slice(sent).map((c) => c.cmd),
+  [],
+  'cancelling sent nothing to Rust — no download, no install',
+)
+console.log('ok  立即更新先二次确认（含备份目录）· 取消即不下载不安装')
+
+// ---- the install streams its progress ------------------------------------
+
+/** The transcript as the DOM has it: count and lines, in order. */
+function progressDom() {
+  const el = window.document.querySelector('[data-progress-count]')
+  assert.ok(el, 'the progress transcript renders')
+  return {
+    el,
+    n: Number(el.getAttribute('data-progress-count')),
+    lines: [...el.querySelectorAll('p.line')].map((p) => p.textContent.trim()),
+  }
+}
+
+assert.equal(progressDom().n, 0, 'the transcript starts empty, with a placeholder')
+assert.match(
+  progressDom().el.textContent,
+  new RegExp(ut('upd.progress.empty').slice(0, 6).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  'and the placeholder says a line will appear',
+)
+// Answer the question for real this time.
+window.document.querySelector('[data-notes-action="install"]').click()
+await flush()
+assert.equal(installAsk(), 'update', 'the question is back')
+window.document.querySelectorAll('[data-confirm-kind] .n-dialog__action button')[1].click()
+
+// Sample the transcript while it fills: a streaming render passes through
+// several intermediate counts, a batch render at the end shows 0 then 9.
+const counts = []
+for (let i = 0; i < 500; i++) {
+  await new Promise((r) => setTimeout(r, 2))
+  const el = window.document.querySelector('[data-progress-count]')
+  counts.push(Number(el.getAttribute('data-progress-count')))
+  if (el.getAttribute('data-progress-running') === 'false' && counts[counts.length - 1] === INSTALL_LINES.length) {
+    break
+  }
+}
+for (let i = 1; i < counts.length; i++) {
+  assert.ok(counts[i] >= counts[i - 1], `the transcript only grows: ${counts.join(',')}`)
+}
+assert.ok(
+  new Set(counts).size >= 3,
+  `lines are rendered as they arrive, not in one batch at the end: ${counts.join(',')}`,
+)
+
+await flush()
+const done = progressDom()
+assert.equal(done.n, INSTALL_LINES.length, `every step is on screen: ${done.n}`)
+assert.deepEqual(
+  done.lines,
+  Array.from(INSTALL_LINES),
+  `the transcript is Rust's, verbatim and in order: ${JSON.stringify(done.lines)}`,
+)
+assert.equal(
+  done.el.getAttribute('data-progress-running'),
+  'false',
+  'the transcript stops claiming work when the install is done',
+)
+// Rust's `InstallReport` is what allows the summary line.
+assert.match(done.el.textContent, /替换 2 个文件/, 'and the result says what the install did')
+console.log(
+  `ok  更新全过程 ${INSTALL_LINES.length} 行实时滚动输出（中间态 ${new Set(counts).size} 次）· 顺序逐字一致`,
+)
+
+// ---- a variant change invalidates the last check -------------------------
+
+// Rust refuses to install a release the user has not seen the notes for
+// (`msg.channel.changed`); the frontend must not offer one either.
+assert.ok(update.release.value, 'a checked release is installable')
+sent = Array.from(ipc.calls).length
+assert.ok(await update.setChannel('win-cpu-x64'), 'the variant went through save_settings')
+await flush()
+const chanCall = Array.from(ipc.calls).slice(sent).find((c) => c.cmd === 'save_settings')
+assert.equal(chanCall.args.settings.upd_channel, 'win-cpu-x64', 'and it carries the new variant')
+assert.equal(update.release.value, null, 'changing the variant drops the release that was checked')
+assert.equal(update.canInstall.value, false, 'so 立即更新 cannot install something never shown')
+assert.ok(
+  window.document.querySelector('[data-update-action="install"]').closest('button').disabled === true,
+  'the install button is disabled until the variant is re-checked',
+)
+console.log('ok  切换构建线即失效旧检查 · 更新按钮随之禁用（不会装没看过的版本）')
+
+// ---- the startup-check preference persists -------------------------------
+
+sent = Array.from(ipc.calls).length
+assert.ok(await update.setAutoOnStartup(false), 'save_settings answered for the startup switch')
+await flush()
+const autoCall = Array.from(ipc.calls).slice(sent).find((c) => c.cmd === 'save_settings')
+assert.equal(autoCall.args.settings.upd_check_on_startup, false, 'the preference went through save_settings')
+assert.equal(update.autoOnStartup.value, false, 'and the store holds what Rust read back')
+assert.equal(
+  window.document.querySelector('[data-update-auto] [role="switch"]').getAttribute('aria-checked'),
+  'false',
+  'the switch follows it',
+)
+console.log('ok  启动时自动检查开关经 save_settings 持久化')
+
+// ---- the copy this ticket needs is answerable ----------------------------
+
+for (const key of Object.keys(UPDATE_COPY)) {
+  assert.match(ut(key), /\S/, `${key} has copy`)
+  assert.equal(ut('nope.not.a.key'), 'nope.not.a.key', 'an unknown key renders as itself')
+}
+// `ut` defers to Rust: a key both tables have is answered by Rust, unchanged.
+assert.equal(ut('upd.install'), store.snapshot.snap.strings['upd.install'])
+assert.match(
+  ut('upd.result', { r: 2, a: 1, d: 2 }),
+  /替换 2 个文件/,
+  'the result line fills its placeholders',
+)
+console.log(`ok  ${Object.keys(UPDATE_COPY).length} 条更新区文案可翻译 · 占位符已填充`)
+
+// ---- ticket 17: apply / revert / presets ---------------------------------
+
+/*
+ * Ticket 15's checks leave the app on the settings page; the submit row lives
+ * in the console view, so the shell's own 设置 button takes us back — the same
+ * route a user takes, rather than poking the view switcher.
+ */
+const backBtn = [...window.document.querySelectorAll('header .actions button')].find((b) =>
+  /设置|Settings/.test(b.textContent),
+)
+assert.ok(backBtn, 'the shell offers a way back to the console')
+backBtn.click()
+await flush()
+
+const bar = window.document.querySelector('[data-preset-bar]')
+assert.ok(bar, 'the preset / submit row renders')
+
+/** Rust's verdict, pushed into the store the way a Snapshot push would. */
+function setDirty(next) {
+  const snap = store.snapshot.snap
+  store.setSnapshot({ ...snap, facts: { ...snap.facts, dirty: next } })
+}
+
+/** The button the row renders for one action. */
+function submitBtn(name) {
+  const el = window.document.querySelector(`[data-action="${name}"]`)
+  assert.ok(el, `the row renders the ${name} control`)
+  return el.closest('button')
+}
+
+/** Is the unapplied-changes hint on screen? */
+function dirtyHint() {
+  return window.document.querySelector('[data-dirty-hint]')
+}
+
+/** Escape one string into a regex, for asserting on rendered copy. */
+function re(text) {
+  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+}
+
+/*
+ * jsdom's `Element` has no `scrollTo`, and NaiveUI's virtual option list calls
+ * it the moment a menu opens — which typing in the preset box does. It is a DOM
+ * gap, not a defect in the app (the same reason ticket 14's checks cannot open
+ * the *service* dropdown), so it is shimmed rather than worked around.
+ */
+window.Element.prototype.scrollTo = function () {}
+window.Element.prototype.scrollIntoView = function () {}
+
+for (const name of ['preset-save', 'preset-del', 'revert', 'apply']) submitBtn(name)
+
+// Rust says the form matches the service: no hint, and Revert is dead.
+store.clearForm()
+setDirty(false)
+await flush()
+assert.equal(store.dirty.value, false, 'Rust reports no unapplied changes')
+assert.equal(dirtyHint(), null, 'no hint while Rust says the form matches')
+assert.equal(bar.getAttribute('data-dirty'), 'false', 'the row says so too')
+
+/*
+ * The bug this ticket exists to remove: an edit sitting in the frontend's own
+ * buffer must NOT light the hint or arm Revert. Only Rust decides, and until
+ * Rust has re-read the form it has not decided anything.
+ */
+store.editField('ngl', '7')
+await flush()
+assert.equal(store.values.value.ngl, '7', 'the edit is on screen')
+assert.equal(store.dirty.value, false, 'the local edit did not decide for Rust')
+assert.equal(dirtyHint(), null, 'no hint from a purely local edit')
+assert.equal(submitBtn('revert').disabled, true, 'Revert is dead without unapplied changes')
+
+// Rust says dirty: the hint appears and Revert comes alive.
+setDirty(true)
+await flush()
+assert.ok(dirtyHint(), 'the hint appears once Rust says the form differs')
+assert.match(dirtyHint().textContent, re(store.t('status.dirty')), 'and it is the semantic one')
+assert.equal(submitBtn('revert').disabled, false, 'Revert is live with unapplied changes')
+console.log('ok  未应用更改提示只在 Rust 判定时出现 · 还原按钮随之启用/禁用')
+
+// ---- Apply asks, and the question carries the comparison ------------------
+
+assert.equal(confirmKind(), null, 'no question is on screen')
+const sent0 = Array.from(ipc.calls).length
+submitBtn('apply').click()
+await flush()
+assert.equal(confirmKind(), 'apply', '应用更改 asks before it writes')
+assert.equal(store.busyName.value, '', 'nothing was sent while the question is open')
+assert.equal(
+  Array.from(ipc.calls).slice(sent0).filter((c) => c.cmd === 'apply_changes').length,
+  0,
+  'and no write went over IPC',
+)
+
+const ask = window.document.querySelector('[data-confirm-kind]')
+assert.match(ask.textContent, re(store.selected.value), 'the question names the service')
+// Old vs new, per field: the old side is Rust's own parse of the service.
+const diff = ask.querySelector('[data-diff-row="ngl"]')
+assert.ok(diff, 'the changed field is in the comparison')
+assert.equal(
+  diff.querySelector('.from').textContent.trim(),
+  store.snapshot.snap.values.ngl,
+  'the old value is what Rust parsed out of the service',
+)
+assert.equal(
+  diff.querySelector('.to').textContent.trim(),
+  '7',
+  'the new value is the form — the only state the frontend owns',
+)
+assert.match(
+  ask.textContent,
+  re(store.snapshot.snap.facts.app_params),
+  "the service's own AppParameters are shown verbatim",
+)
+// Cancelling closes it and writes nothing.
+confirmButtons()[0].click()
+await flush()
+assert.equal(confirmKind(), null, '取消 closes the question')
+assert.equal(store.busyName.value, '', 'cancelling sent nothing')
+console.log('ok  应用更改先展示新旧参数对比再二次确认 · 取消即不写服务')
+
+// ---- presets: an editable box, and delete asks ----------------------------
+
+// The box is an input, not only a menu: typing a preset name is the point.
+const box = bar.querySelector('input')
+assert.ok(box, 'the preset name is typeable, not menu-only')
+box.value = '7B 快速'
+box.dispatchEvent(new window.Event('input'))
+await flush()
+assert.equal(
+  submitBtn('preset-del').disabled,
+  false,
+  '删除 is live for a name that exists',
+)
+assert.equal(
+  submitBtn('preset-save').disabled,
+  true,
+  '保存 is a no-op for a name that exists, so it does not offer one',
+)
+
+submitBtn('preset-del').click()
+await flush()
+assert.equal(confirmKind(), 'preset-del', '删除预设 asks first')
+assert.match(
+  window.document.querySelector('[data-confirm-kind]').textContent,
+  re(pt('msg.preset.del', { n: '7B 快速' })),
+  'and the question names the preset',
+)
+confirmButtons()[0].click()
+await flush()
+assert.equal(confirmKind(), null, '取消 leaves the preset alone')
+assert.equal(
+  Array.from(ipc.calls).filter((c) => c.cmd === 'delete_preset').length,
+  0,
+  'nothing was deleted',
+)
+console.log('ok  预设名为可编辑输入框 · 删除先二次确认 · 取消即不删')
+
+// ---- switching with unapplied changes asks, and offers the backup ---------
+
+/*
+ * The dropdown's own menu cannot be opened in jsdom (NaiveUI's virtual list
+ * calls `scrollTo`), so the question is opened through the very function the
+ * select's handler calls. What is asserted is the confirmation and its three
+ * answers, which is the part that has to hold.
+ */
+const held = store.selected.value
+askGuard('service', 'QwenVL')
+await flush()
+assert.equal(confirmKind(), 'service', 'switching service with unapplied changes asks first')
+const guardText = window.document.querySelector('[data-confirm-kind]').textContent
+assert.match(guardText, /QwenVL/, 'the question names the target')
+assert.match(guardText, re(pt('msg.svc.dirty')), 'and says what would be lost')
+assert.ok(
+  window.document.querySelector('[data-guard-discard="service"]'),
+  'it offers continuing without a backup',
+)
+assert.equal(store.selected.value, held, 'the service has not moved while the question is open')
+assert.equal(store.busyName.value, '', 'and nothing was sent')
+confirmButtons()[0].click()
+await flush()
+assert.equal(confirmKind(), null, '取消 closes it')
+assert.equal(store.selected.value, held, 'the service is still the one Rust selected')
+assert.equal(
+  Array.from(ipc.calls).filter((c) => c.cmd === 'switch_service').length,
+  0,
+  'no switch was sent',
+)
+
+// The same guard serves switching *preset* with unapplied changes.
+askGuard('preset', '32B 长上下文')
+await flush()
+assert.equal(confirmKind(), 'preset', '载入预设 with unapplied changes asks too')
+assert.match(
+  window.document.querySelector('[data-confirm-kind]').textContent,
+  re(pt('msg.preset.dirty')),
+  'and it is the preset question, not the service one',
+)
+confirmButtons()[0].click()
+await flush()
+assert.equal(confirmKind(), null, '取消 leaves the form alone')
+console.log('ok  切换服务 / 载入预设前先确认并提供自动备份 · 取消即不切换')
+
+// ---- the copy this ticket needs is answerable -----------------------------
+
+for (const key of Object.keys(SUBMIT_COPY)) {
+  assert.match(pt(key), /\S/, `${key} has copy`)
+  assert.equal(pt('nope.not.a.key'), 'nope.not.a.key', 'an unknown key renders as itself')
+}
+// `pt` defers to Rust: a key Rust owns is answered by Rust, unchanged.
+assert.equal(pt('btn.revert'), store.snapshot.snap.strings['btn.revert'])
+assert.equal(pt('btn.apply2'), store.snapshot.snap.strings['btn.apply2'])
+assert.equal(pt('card.presets'), store.snapshot.snap.strings['card.presets'])
+// The auto-backup name is a *preset* name with a timestamp, not a file backup.
+assert.match(
+  autoBackupName(new Date(2026, 2, 14, 9, 12, 41)),
+  /03-14 09:12:41/,
+  'the auto-backup name carries the stamp Python used',
+)
+console.log(`ok  ${Object.keys(SUBMIT_COPY).length} 条提交区文案可翻译 · 自动备份名带时间戳`)
+
 // ---- no console noise ------------------------------------------------------
 
 const noise = warnings.filter((w) => !/Could not parse CSS|Not implemented/.test(w))
 assert.deepEqual(noise, [], `the console stayed clean:\n${noise.join('\n')}`)
 console.log('ok  no runtime errors or Vue warnings')
 
-console.log('\nall ticket 12 + 13 + 14 smoke checks passed')
+console.log('\nall ticket 12 + 13 + 14 + 15 + 17 smoke checks passed')
 dom.window.close()

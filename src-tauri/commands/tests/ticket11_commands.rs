@@ -19,7 +19,7 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
+use std::sync::atomic::{AtomicU64, Ordering};
 use llama_ctl_commands::fields;
 use llama_ctl_commands::ipc::{self, ErrorPayload, OkPayload};
 use llama_ctl_commands::snapshot::{
@@ -64,7 +64,14 @@ fn env() -> Env {
 
 /// A fake with two NSSM services holding parameter sets, a health probe that
 /// answers, and `sc` / powershell scripted.
+///
+/// The clock advances on every call: auto-backup names carry a timestamp, and
+/// `save_preset` is deliberately a no-op for an existing name, so two cases
+/// sharing one clock would collide and only the first backup would be written.
 fn world(app_params: &str) -> FakeDeps {
+    static TICK: AtomicU64 = AtomicU64::new(0);
+    let tick = TICK.fetch_add(1, Ordering::Relaxed);
+    let now = 1_700_000_000_000 + tick * 1000;
     FakeDeps::new()
         .with_reg_string(&params_key(SERVICE), "AppDirectory", Some(DIR.to_string()))
         .with_reg_string(&params_key(SERVICE), "AppParameters", Some(app_params.to_string()))
@@ -74,7 +81,7 @@ fn world(app_params: &str) -> FakeDeps {
         .with_reg_dword(&service_key(OTHER), "Start", Some(3))
         .with_spawn("powershell.exe", Ok(format!("{SERVICE}\r\n{OTHER}\r\n").into_bytes()))
         .with_health("127.0.0.1", 8080, true)
-        .with_now(1_700_000_000_000)
+        .with_now(now)
 }
 
 /// Boot the app the way the tauri layer does: settings (including the cached

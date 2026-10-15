@@ -7,6 +7,7 @@
  * below without touching this file.
  */
 import StatusCard from '../components/StatusCard.vue'
+import PresetBar from '../components/PresetBar.vue'
 import ParamForm from '../components/ParamForm.vue'
 import LogTail from '../components/LogTail.vue'
 </script>
@@ -14,16 +15,22 @@ import LogTail from '../components/LogTail.vue'
 <template>
   <div class="view">
     <StatusCard />
+    <!-- Ticket 17: presets, the unapplied-changes hint, Apply and Revert. -->
+    <div class="slot enter enter-2">
+      <slot name="submit">
+        <PresetBar />
+      </slot>
+    </div>
 
     <!-- Ticket 13: the seven collapsible parameter groups. -->
-    <div class="slot enter enter-2">
+    <div class="slot enter enter-3">
       <slot name="form">
         <ParamForm />
       </slot>
     </div>
 
     <!-- Ticket 14: the server.err log tail. -->
-    <div class="slot enter enter-3">
+    <div class="slot enter enter-4">
       <slot name="log">
         <LogTail />
       </slot>

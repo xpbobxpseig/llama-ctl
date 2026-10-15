@@ -27,12 +27,14 @@ import {
   darkTheme,
 } from 'naive-ui'
 import AppShell from './components/AppShell.vue'
+import UpdatePrompt from './components/UpdatePrompt.vue'
 import ConsoleView from './views/ConsoleView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { naiveOverrides, cssVars } from './theme/index.js'
 import * as store from './stores/snapshot.js'
 import * as theme from './stores/theme.js'
 import * as geo from './window/geometry.js'
+import * as update from './stores/update.js'
 import * as ipc from './api/ipc.js'
 
 /** `"console" | "settings"` — the only two destinations. */
@@ -76,7 +78,12 @@ onMounted(async () => {
     await ipcSafe(() => ipc.onProgress(ipc.EVENT_RESTART, store.pushLog)),
     await ipcSafe(() => ipc.onProgress(ipc.EVENT_UPDATE, store.pushLog)),
   )
+  // Ticket 15: the startup update check. It only ever *prompts* — nothing in
+  // this path can download or install (ADR-0001). It runs after the first
+  // paint, so a slow network cannot delay the window.
+  await update.autoCheck()
 })
+
 
 onUnmounted(() => {
   unlisten.forEach((fn) => fn && fn())
@@ -173,6 +180,13 @@ function toConsole() {
 
         <ConsoleView v-else-if="view === 'console'" />
         <SettingsView v-else @close="toConsole" />
+
+        <!--
+          Ticket 15: the update's two questions, once for the whole window — the
+          startup check runs while the console is on screen, so the prompt
+          cannot live inside the settings page.
+        -->
+        <UpdatePrompt />
       </AppShell>
     </NMessageProvider>
   </NConfigProvider>

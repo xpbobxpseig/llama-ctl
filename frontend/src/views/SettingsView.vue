@@ -1,6 +1,7 @@
 <script setup>
 /**
- * The settings view: language, appearance and the master motion switch.
+ * The settings view: language, appearance, motion, and the official-update
+ * section (ticket 15).
  *
  * Every control writes through `save_settings` and is answered with a fresh
  * Snapshot, so "the preference is saved" is something Rust read back, not
@@ -8,10 +9,13 @@
  * string table, which is why the whole UI re-renders from it and no copy is
  * duplicated here.
  *
- * Ticket 15 fills the official-update section into the slot at the bottom.
+ * The update section is ticket 15's own component, dropped into the slot at the
+ * bottom: it owns the variant selector, the two confirmations and the streamed
+ * progress, and it reads its channel list from the same Snapshot.
  */
 import { computed, ref } from 'vue'
 import { NSelect, NSwitch, NButton, NAlert } from 'naive-ui'
+import UpdateSection from '../components/UpdateSection.vue'
 import * as store from '../stores/snapshot.js'
 import * as theme from '../stores/theme.js'
 
@@ -100,9 +104,15 @@ async function setMotion(next) {
       </NAlert>
     </section>
 
-    <!-- Ticket 15: the official-update section. -->
+    <!--
+      Ticket 15: the official-update section — variant, check, the two
+      confirmations, and the streamed progress. The slot stays, so a test can
+      swap it out.
+    -->
     <div class="enter enter-2">
-      <slot />
+      <slot>
+        <UpdateSection />
+      </slot>
     </div>
 
     <div class="row">

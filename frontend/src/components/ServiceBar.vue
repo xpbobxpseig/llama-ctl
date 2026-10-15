@@ -13,11 +13,19 @@
  *     is nothing selected — a disabled control says *why* through its tooltip.
  *
  * No service state is mirrored: the dropdown's value is `selected` from the
- * snapshot, so it cannot drift from what Rust last read.
+ * snapshot, so it cannot drift from what Rust last read — and a cancelled
+ * switch question needs no rollback, because the box never moved by itself.
+ *
+ * Ticket 17 added one rule here: switching away from a form with unapplied
+ * changes asks first and offers an Auto backup. Whether there *are* unapplied
+ * changes is Rust's verdict (`Snapshot.facts.dirty`), never the dropdown's.
  */
 import { computed, ref } from 'vue'
 import { NSelect, NButton, NTooltip } from 'naive-ui'
 import ServiceControls from './ServiceControls.vue'
+import GuardDialog, { askGuard } from './GuardDialog.vue'
+import { pt } from './submit-copy.js'
+import { ct } from './control-copy.js'
 import * as ipc from '../api/ipc.js'
 import * as store from '../stores/snapshot.js'
 
@@ -46,16 +54,33 @@ const disabled = computed(
 )
 
 /**
+ * Ask before switching, when the form has unapplied changes.
+ *
+ * `dirty` is Rust's semantic verdict, read off the Snapshot. The dropdown's own
+ * value is `selected`, so a cancelled question needs no rollback: the box is
+ * still showing the service Rust last read.
+ */
+function requestSwitch(name) {
+  if (name === store.selected.value) return
+  if (store.dirty.value) {
+    askGuard('service', name)
+    return
+  }
+  onSwitch(name, false)
+}
+
+/**
  * Switch service. The form being abandoned goes along so Rust can auto-back it
  * up when it has unapplied changes — and only then, which is ticket 11's rule
- * on `Auto backup`.
+ * on `Auto backup`: `backup` is only ever true because the user asked for it,
+ * and even then Rust stores nothing for a form that is semantically identical
+ * to the service.
  */
-async function onSwitch(name) {
-  if (name === store.selected.value) return
+async function onSwitch(name, backup) {
   switching.value = true
   try {
     await store.run('switch_service', () =>
-      ipc.switchService(name, store.snapshot.form, true),
+      ipc.switchService(name, store.snapshot.form, backup),
     )
     // A successful switch refills the form from the new service, so the edit
     // buffer Rust just answered with is the truth — drop ours.
@@ -84,7 +109,7 @@ async function onRefresh() {
         :placeholder="store.t('state.unknown')"
         size="small"
         class="sel"
-        @update:value="onSwitch"
+        @update:value="requestSwitch"
       />
       <NTooltip v-if="disabledReason" :delay="300">
         <template #trigger>
@@ -104,6 +129,23 @@ async function onRefresh() {
     <slot>
       <ServiceControls />
     </slot>
+
+    <!--
+      Ticket 17: switching service with unapplied changes asks first, and the
+      auto-backup is offered rather than assumed. Cancelling leaves the box on
+      the service Rust last read — it is controlled, so there is nothing to
+      roll back.
+    -->
+    <GuardDialog
+      kind="service"
+      :title="pt('mb.confirm')"
+      :message="pt('msg.svc.dirty')"
+      :backup-text="pt('guard.backup')"
+      :discard-text="pt('guard.discard')"
+      :cancel-text="ct('btn.cancel')"
+      @backup="(name) => onSwitch(name, true)"
+      @discard="(name) => onSwitch(name, false)"
+    />
   </div>
 </template>
 
