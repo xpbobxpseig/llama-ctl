@@ -26,5 +26,7 @@ src-tauri/commands/target/
 src-tauri/target/
 src-tauri/gen/
 
-# 占位前端的 node 依赖（ticket 12 会引入构建工具）
+# 前端构建产物与依赖（ticket 12 引入 Vite；dist 由 npm run build 产出）
 frontend/node_modules/
+frontend/dist/
+frontend/.smoke/

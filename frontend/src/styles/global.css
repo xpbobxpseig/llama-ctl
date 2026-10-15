@@ -1,0 +1,268 @@
+/*
+ * Global styles for the shell (ticket 12).
+ *
+ * Everything here reads a custom property that `src/theme/index.js` writes —
+ * there is no second copy of a colour or a font size in this file. The
+ * NaiveUI half of the app is themed through `n-config-provider`; this file
+ * covers the plain DOM: the window frame, the slots, and the type scale.
+ *
+ * ADR-0001: no @font-face, no @import. Both families are resolved from the
+ * local system, and Cascadia Mono falls back to Consolas where it is absent.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--font-ui);
+  font-size: var(--f-body);
+  line-height: 1.5;
+  /* The window is a control surface, not a document: text selection only ever
+     gets in the way of dragging a slider. Mono readouts opt back in. */
+  -webkit-user-select: none;
+  user-select: none;
+  /* State change, not decoration: 100ms in, and the slower decay back out. */
+  transition:
+    background-color var(--m-hover-out) var(--m-ease-decay),
+    color var(--m-hover-out) var(--m-ease-decay);
+}
+
+/* ---- the six type steps --------------------------------------------------- */
+
+.t-display {
+  font-size: var(--f-display);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1.3;
+}
+
+.t-section {
+  font-size: var(--f-section);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.t-group {
+  font-size: var(--f-group);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.t-body {
+  font-size: var(--f-body);
+  line-height: 1.5;
+}
+
+.t-small {
+  font-size: var(--f-small);
+  line-height: 1.5;
+}
+
+.t-micro {
+  font-size: var(--f-micro);
+  line-height: 1.5;
+}
+
+/* Numbers and readouts: mono, and the *same size* as body text so a value and
+   its label share a baseline (the 4px drift the Python build had). */
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: var(--f-mono);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.t-mono-sm {
+  font-family: var(--font-mono);
+  font-size: var(--f-mono-sm);
+  line-height: 1.7;
+}
+
+.muted {
+  color: var(--mut);
+}
+
+/* Anything the user may want to copy — paths, log lines, the health verdict. */
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ---- surfaces ------------------------------------------------------------- */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+  padding: var(--sp-lg);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+}
+
+.spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Long content must reflow, never overlap and never be clipped away. */
+.wrap-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ---- entrances ------------------------------------------------------------ */
+
+/*
+ * One keyframe, reused with a small stagger on lists. Spring-like (no
+ * overshoot), and turned off entirely under reduced motion — the element then
+ * starts at its end state instead of animating to it.
+ */
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.enter {
+  animation: enter-up var(--m-enter) var(--m-ease-out) both;
+}
+
+.enter-1 {
+  animation-delay: 0ms;
+}
+.enter-2 {
+  animation-delay: 40ms;
+}
+.enter-3 {
+  animation-delay: 80ms;
+}
+.enter-4 {
+  animation-delay: 120ms;
+}
+.enter-5 {
+  animation-delay: 160ms;
+}
+.enter-6 {
+  animation-delay: 200ms;
+}
+
+/* ---- focus ---------------------------------------------------------------- */
+
+/*
+ * One visible focus ring for everything, keyboard-only. A mouse click on a
+ * control must not leave a ring behind; tabbing to it must show one.
+ */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: var(--r-ctl);
+}
+
+/* NaiveUI renders its own focus treatment on some internals; the ring above
+   still has to win, so it is restated at a higher specificity for the parts
+   that set `box-shadow` on focus. */
+.n-button:focus-visible,
+.n-base-selection:focus-visible,
+.n-input:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+/* ---- scrollbars ----------------------------------------------------------- */
+
+.scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray) transparent;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--gray);
+  border-radius: 5px;
+  border: 2px solid var(--bg);
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- reduced motion ------------------------------------------------------- */
+
+/*
+ * The master switch and the OS preference both land here. Nothing is disabled:
+ * every animation still runs, it just takes no time, so a transition that
+ * ends in a different visual state still ends there.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.motion-off *,
+.motion-off *::before,
+.motion-off *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ---- NaiveUI touch-ups ---------------------------------------------------- */
+
+/*
+ * NaiveUI's own reset sets `font-size` on a few roots from its 14px base.
+ * These three rules are the only place the app reaches into component
+ * internals: without them a card title renders 14px no matter what the
+ * overrides say.
+ */
+.n-card-header__main {
+  font-size: var(--f-section);
+  font-weight: 700;
+}
+
+.n-base-selection-label,
+.n-base-selection .n-base-selection-input__content {
+  font-size: var(--f-body);
+}
+
+.n-slider .n-slider-handle {
+  /* The 16px knob of the Python build, with its hairline instead of a border
+     (a border would push the knob 2px off the track). */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}

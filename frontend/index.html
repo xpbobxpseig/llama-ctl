@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  Window chrome for the Tauri shell (ticket 12).
+
+  ADR-0001: nothing here reaches outside the bundle. No remote font, no CDN,
+  no favicon fetched over http — the icon is a data: URI (CSP allows
+  `img-src data:`) and both font families are resolved from the local system.
+-->
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>llama.cpp 服务控制台</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a84ff'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23fff'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

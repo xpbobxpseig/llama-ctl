@@ -1,0 +1,24 @@
+{
+  "name": "llama-ctl-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "llama.cpp 服务控制台 — Vue 3 + NaiveUI shell (ticket 12)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "smoke": "node smoke.mjs",
+    "check": "npm run build && npm run smoke"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.1",
+    "naive-ui": "^2.45.3",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "jsdom": "^27.4.0",
+    "vite": "^6.4.4"
+  }
+}
