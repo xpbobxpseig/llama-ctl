@@ -126,3 +126,13 @@ def test_non_dict_treated_as_empty(tmp_path, monkeypatch):
     with open(target, "w", encoding="utf-8") as f:
         json.dump([1, 2, 3], f)
     assert presets.load_presets() == {}
+
+def test_default_path_is_in_user_data_dir(monkeypatch):
+    """默认落点必须是用户目录（issue 00），不再是程序目录下的固定路径。"""
+    monkeypatch.delenv("LLAMA_CTL_PRESETS", raising=False)
+    monkeypatch.setattr(presets, "LEGACY_PRESETS_FILE", r"F:\llama_ctl\no-such-file.json")
+    monkeypatch.setenv("APPDATA", r"C:\Users\someone\AppData\Roaming")
+    assert presets.resolve_presets_file() == \
+        r"C:\Users\someone\AppData\Roaming\llama-ctl\presets.json"
+    monkeypatch.setenv("LLAMA_CTL_PRESETS", r"D:\custom\presets.json")
+    assert presets.resolve_presets_file() == r"D:\custom\presets.json"

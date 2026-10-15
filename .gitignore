@@ -20,3 +20,4 @@ _smoke_p3.py
 
 # 一次性基准/性能测试输出（llama-bench 结果，不进仓库）
 bench*.txt
+src-tauri/core/target/
