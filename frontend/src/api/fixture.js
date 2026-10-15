@@ -46,6 +46,7 @@ const STRINGS = {
   'upd.status.unknown': '当前版本未知（无法读取 llama-server.exe）',
   'upd.status.none': '还未检查过更新',
   'upd.uptodate': '已是最新',
+  'browse': '浏览',
 }
 
 /** A Snapshot as Rust would return it, for the demo service `QwenLLM`. */
@@ -56,7 +57,10 @@ export function demoSnapshot(overrides = {}) {
     facts: {
       app_dir: 'F:\\llama.cpp',
       app_params:
-        '-m F:\\models\\Qwen3-32B-Q4_K_M.gguf --host 127.0.0.1 --port 8080 -c 131072 -ngl 999 --no-mmap',
+        '-m "F:\\models\\Qwen3-32B-Q4_K_M.gguf" -a qwen3-32b -ngl 99 --spec-type draft-mtp' +
+        ' --ctx-size 131072 -ctk q8_0 -ctv q8_0 -fa auto -np 1 -b 2048 -ub 512 -t 16' +
+        ' --temp 0.8 --min-p 0.05 --top-k 40 --top-p 0.95 --jinja --host 127.0.0.1' +
+        ' --port 8080 --no-mmap',
       start: 'auto',
       dirty: false,
     },
@@ -64,14 +68,32 @@ export function demoSnapshot(overrides = {}) {
     values: {
       model: 'F:\\models\\Qwen3-32B-Q4_K_M.gguf',
       mmproj: '',
-      ngl: '999',
-      ctx: '131072',
+      alias: 'qwen3-32b',
+      ngl: '99',
+      spec_type: 'draft-mtp',
+      spec_draft_model: '',
+      spec_draft_n_max: '3',
+      ctx_size: '131072',
+      ctk: 'q8_0',
+      ctv: 'q8_0',
+      flash_attn: 'auto',
+      parallel: '1',
+      batch_size: '2048',
+      ubatch_size: '512',
+      threads: '16',
+      temperature: '0.8',
+      min_p: '0.05',
+      top_k: '40',
+      top_p: '0.95',
+      seed: '',
+      jinja: '1',
+      chat_template_kwargs: '',
       host: '127.0.0.1',
       port: '8080',
-      threads: '16',
-      temp: '0.8',
-      'no-mmap': 'true',
-      'mlock': 'false',
+      no_mmap: '1',
+      mlock: '',
+      no_kv_offload: '',
+      cpu_moe: '',
     },
     extras: [],
     warnings: [],

@@ -50,7 +50,7 @@ use llama_ctl_core::i18n::{self, Lang};
 use llama_ctl_core::install::{self as inst, InstallEnv, InstallPaths};
 use llama_ctl_core::params::{self, Field};
 use llama_ctl_core::persist::{self, Env, Presets, Settings};
-use llama_ctl_core::service::{self as svc, FactsCache, StartMode, Status};
+use llama_ctl_core::service::{self as svc, app_directory, FactsCache, StartMode, Status};
 use llama_ctl_core::updater::{self, Release, Variant};
 use llama_ctl_core::update_files;
 
@@ -726,6 +726,27 @@ pub fn installed_build(d: &impl Deps, app: &App) -> Option<u32> {
     let service = app.selected()?;
     let dir = inst::target_dir(d, &app.facts, service, &app.install_env);
     updater::get_installed_build(d, &dir.join(inst::SERVER_EXE))
+}
+
+/// The tail of the selected service's `server.err`.
+///
+/// Lives here rather than in [`crate::log`] because it needs `App`'s private
+/// facts cache; the path derivation itself is unit-tested there.
+///
+/// A missing or unreadable file yields no lines and no error — the log region
+/// is decoration, and a missing file must never block startup.
+pub fn tail_log(d: &impl Deps, app: &App) -> Vec<String> {
+    let Some(service) = app.selected() else {
+        return Vec::new();
+    };
+    crate::log::tail_log(d, &app.facts, service)
+}
+
+/// Where `server.err` is being read from, so the UI can label the region.
+pub fn log_path(d: &impl Deps, app: &App) -> Option<String> {
+    let service = app.selected()?;
+    let dir = app_directory(d, &app.facts, service);
+    Some(crate::log::log_path(dir.as_deref()).to_string_lossy().into_owned())
 }
 
 /// Run the update install, streaming every progress line to `sink`.

@@ -7,7 +7,8 @@
  * below without touching this file.
  */
 import StatusCard from '../components/StatusCard.vue'
-import * as store from '../stores/snapshot.js'
+import ParamForm from '../components/ParamForm.vue'
+import LogTail from '../components/LogTail.vue'
 </script>
 
 <template>
@@ -17,16 +18,15 @@ import * as store from '../stores/snapshot.js'
     <!-- Ticket 13: the seven collapsible parameter groups. -->
     <div class="slot enter enter-2">
       <slot name="form">
-        <section class="card placeholder">
-          <h2 class="t-section">{{ store.t('card.params') }}</h2>
-          <p class="t-small muted">{{ store.t('settings.note') }}</p>
-        </section>
+        <ParamForm />
       </slot>
     </div>
 
     <!-- Ticket 14: the server.err log tail. -->
     <div class="slot enter enter-3">
-      <slot name="log" />
+      <slot name="log">
+        <LogTail />
+      </slot>
     </div>
   </div>
 </template>
@@ -41,13 +41,5 @@ import * as store from '../stores/snapshot.js'
 
 .slot {
   min-width: 0;
-}
-
-.placeholder h2 {
-  margin: 0 0 var(--sp-xs);
-}
-
-.placeholder p {
-  margin: 0;
 }
 </style>

@@ -28,3 +28,5 @@ pub use ipc::{ErrorPayload, OkPayload};
 pub use snapshot::{
     App, ApplyResult, FactsView, InstallReport, Snapshot, UpdateCheck,
 };
+pub mod log;
+

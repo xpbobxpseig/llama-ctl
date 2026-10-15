@@ -13,6 +13,7 @@
  * like "it is fine".
  */
 import { computed } from 'vue'
+import StatusDot from './StatusDot.vue'
 import * as store from '../stores/snapshot.js'
 
 const RUNNING = 'RUNNING'
@@ -23,13 +24,6 @@ const running = computed(() => state.value === RUNNING)
 const stopped = computed(() => state.value === STOPPED)
 const known = computed(() => state.value !== '' && state.value !== 'UNKNOWN')
 
-/** The dot's colour: green only for RUNNING. */
-const dotColor = computed(() => {
-  if (running.value) return 'var(--run)'
-  if (stopped.value) return 'var(--stop)'
-  return 'var(--gray)'
-})
-
 const dir = computed(() => store.snapshot.snap?.facts?.app_dir ?? '')
 const params = computed(() => store.snapshot.snap?.facts?.app_params ?? '')
 const startMode = computed(() => store.snapshot.snap?.facts?.start ?? '')
@@ -37,7 +31,7 @@ const startMode = computed(() => store.snapshot.snap?.facts?.start ?? '')
 
 <template>
   <section class="card status enter enter-1" aria-live="polite">
-    <span class="dot" :style="{ background: dotColor }" aria-hidden="true" />
+    <StatusDot class="dotcell" :state="state" :size="12" />
 
     <div class="col">
       <div class="t-section" :class="{ 'is-run': running }">
@@ -85,13 +79,15 @@ const startMode = computed(() => store.snapshot.snap?.facts?.start ?? '')
   min-width: 0;
 }
 
-.dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+/*
+ * The dot is `StatusDot.vue` now — an inline SVG, not a CSS circle and not a
+ * font glyph. This cell only reserves its box so the halo (which is drawn
+ * outside the core's radius) has room and the grid column never changes width
+ * when the breathing starts or stops.
+ */
+.dotcell {
   flex: none;
-  /* State change, immediate: the dot is the answer to "is it up?". */
-  transition: background-color var(--m-hover-in) var(--m-ease-out);
+  display: block;
 }
 
 .col {

@@ -17,6 +17,7 @@
  */
 import { computed, ref } from 'vue'
 import { NSelect, NButton, NTooltip } from 'naive-ui'
+import ServiceControls from './ServiceControls.vue'
 import * as ipc from '../api/ipc.js'
 import * as store from '../stores/snapshot.js'
 
@@ -99,8 +100,10 @@ async function onRefresh() {
 
     <div class="spacer" />
 
-    <!-- Slot for ticket 14's start / stop / restart / auto-start controls. -->
-    <slot />
+    <!-- Ticket 14: start / stop / restart / boot auto-start. -->
+    <slot>
+      <ServiceControls />
+    </slot>
   </div>
 </template>
 

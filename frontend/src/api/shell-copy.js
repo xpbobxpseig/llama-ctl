@@ -12,7 +12,8 @@
  *
  * ADR-0005 still holds: these are *skeleton* strings (labels and buttons), not
  * parameter explanations, and no component ships a translation of its own
- * beyond this file.
+ * beyond this file. The `param.*` explanations ticket 13 needs live in
+ * `src/api/field-copy.js` for the same reason.
  */
 export const SHELL_COPY = {
   'settings.appear': { zh: '外观', en: 'Appearance' },
@@ -32,6 +33,9 @@ export const SHELL_COPY = {
   'shell.retry': { zh: '重试', en: 'Retry' },
   'shell.rescan': { zh: '重新扫描', en: 'Rescan' },
   'shell.no_service': { zh: '尚未发现 NSSM 服务', en: 'No NSSM service found yet' },
+  // Ticket 13: the parameter form's expand/collapse-all.
+  'shell.expand_all': { zh: '全部展开', en: 'Expand all' },
+  'shell.collapse_all': { zh: '全部收起', en: 'Collapse all' },
   'shell.demo': {
     zh: '演示数据：未连接到 Rust 后端',
     en: 'Demo data: not connected to the Rust backend',

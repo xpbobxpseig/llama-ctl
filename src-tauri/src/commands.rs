@@ -126,6 +126,25 @@ pub fn get_snapshot(
     Ok(OkPayload::new(&snap))
 }
 
+/// The tail of the selected service's `server.err`, plus the path it came
+/// from so the UI can label the region. Costs one file read; the log region
+/// polls it, it is not part of every Snapshot.
+#[tauri::command]
+pub fn tail_log(
+    d: State<'_, DepsHandle>,
+    app: State<'_, AppState>,
+) -> Result<OkPayload, ErrorPayload> {
+    let (lines, path) = with_app(&app, |a| {
+        (cmd::tail_log(d.deps(), a), cmd::log_path(d.deps(), a))
+    });
+    #[derive(serde::Serialize)]
+    struct Tail {
+        lines: Vec<String>,
+        path: Option<String>,
+    }
+    Ok(OkPayload::new(&Tail { lines, path }))
+}
+
 /// Re-enumerate the NSSM services. Costs one powershell call (~0.6 s), so call
 /// it off the frame that paints the dropdown.
 #[tauri::command]
@@ -339,6 +358,7 @@ where
 pub fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         get_snapshot,
+        tail_log,
         refresh_services,
         switch_service,
         apply_changes,

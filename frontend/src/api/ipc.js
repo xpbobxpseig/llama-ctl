@@ -67,6 +67,13 @@ export function errorLine(err) {
 /** The whole-state Snapshot. One fetch, everything one screen needs. */
 export const getSnapshot = (values = null) => call('get_snapshot', { values })
 
+/**
+ * The tail of the selected service's `server.err`.
+ * Returns `{ lines, path }`; `lines` is empty when the file is missing, which
+ * is not an error — the log region is decoration.
+ */
+export const tailLog = () => call('tail_log')
+
 /** Re-enumerate the NSSM services (one powershell call, ~0.6 s). */
 export const refreshServices = () => call('refresh_services')
 
