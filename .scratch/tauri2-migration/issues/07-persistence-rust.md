@@ -1,4 +1,4 @@
-# 07: presets 与 settings 的 Rust 持久化
+﻿# 07: presets 与 settings 的 Rust 持久化
 
 **What to build:** 把预设与偏好的持久化移植到 Rust，读的位置与 00 在 Python 侧定下的用户目录一致。用户视角：预设跨服务复用，偏好在重启后保留，文件损坏时不会清空全部设置。
 
@@ -6,14 +6,14 @@
 
 **Status:** ready-for-agent
 
-- [ ] 存放位置与 00 定下的用户目录一致，Python 版与 Rust 版共用同一位置
-- [ ] 写入是原子写（临时文件 + rename）
-- [ ] 文件损坏时逐项回退默认值，而不是整体丢弃
-- [ ] 写入失败返回错误而非 panic（目录只读时用户能看到提示）
-- [ ] Preset 保存时同名已存在为 no-op，不误覆盖
-- [ ] Preset 载入只填表单、不写服务
-- [ ] 环境变量覆盖优先级与 Python 版一致
-- [ ] 迁移现有测试：`test_presets.py` 128 行 + `test_preset_safety.py` 247 行
+- [x] 存放位置与 00 定下的用户目录一致，Python 版与 Rust 版共用同一位置
+- [x] 写入是原子写（临时文件 + rename）
+- [x] 文件损坏时逐项回退默认值，而不是整体丢弃
+- [x] 写入失败返回错误而非 panic（目录只读时用户能看到提示）
+- [x] Preset 保存时同名已存在为 no-op，不误覆盖
+- [x] Preset 载入只填表单、不写服务
+- [x] 环境变量覆盖优先级与 Python 版一致
+- [x] 迁移现有测试：`test_presets.py` 128 行 + `test_preset_safety.py` 247 行
 
 ## Resolution
 
