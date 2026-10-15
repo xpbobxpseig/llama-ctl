@@ -8,4 +8,5 @@ pub mod updater;
 pub mod service;
 pub mod update_files;
 pub mod real;
+pub mod install;
 
