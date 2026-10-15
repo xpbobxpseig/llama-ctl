@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use llama_ctl_core::deps::Deps;
 use llama_ctl_core::deps::AppErrorKind;
 use llama_ctl_core::fake::{Call, FakeDeps};
 use llama_ctl_core::persist::{
@@ -346,4 +347,34 @@ fn settings_round_trip_through_save_then_load() {
     let plain = Settings::default();
     save_settings(&d, &env(), &plain).unwrap();
     assert_eq!(load_settings(&d, &env()), plain);
+}
+
+#[test]
+fn escaped_and_non_ascii_values_survive_a_roundtrip() {
+    // A hand-rolled reader is exactly where these get lost: a backslash or a
+    // surrogate pair in a preset name or a model path. These are user data.
+    let d = FakeDeps::new();
+    let mut presets = Presets::new();
+    let mut values = BTreeMap::new();
+    values.insert("model".to_string(), r"C:\模型\qwen".to_string());
+    values.insert("note".to_string(), "引号 \" 与反斜杠 \\ 与制表符 \t".to_string());
+    values.insert("emoji".to_string(), "🦙 llama".to_string());
+    presets.insert(r#"预设 "A""#.to_string(), values.clone());
+
+    save_presets(&d, &env(), &presets).unwrap();
+
+    let loaded = load_presets(&d, &env());
+    assert_eq!(loaded.get(r#"预设 "A""#), Some(&values));
+}
+
+#[test]
+fn deeply_nested_json_does_not_exhaust_the_stack() {
+    // The replaced hand-rolled parser capped recursion at 64; serde_json has
+    // its own limit and returns an error rather than unwinding.
+    let depth = 500;
+    let raw = format!("{}{}", "{".repeat(depth), "}".repeat(depth));
+    let d = FakeDeps::new();
+    d.write_file(&presets_path(), raw.as_bytes()).unwrap();
+    // Either parsed or rejected — the point is it must not panic.
+    let _ = load_presets(&d, &env());
 }

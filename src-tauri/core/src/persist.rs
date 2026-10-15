@@ -1,4 +1,4 @@
-//! Settings and presets persistence — Rust port of `settings.py` + `presets.py`.
+﻿//! Settings and presets persistence — Rust port of `settings.py` + `presets.py`.
 //!
 //! Every file access goes through [`Deps`], so the whole module is testable
 //! without a disk. Three behaviours are load-bearing and must survive later
@@ -26,10 +26,12 @@
 //! `LLAMA_CTL_SETTINGS` / `LLAMA_CTL_PRESETS` override it entirely (no user
 //! data dir, no migration), same priority as Python.
 //!
-//! JSON is parsed by a small hand-rolled reader instead of `serde_json`:
-//! `serde_json` is a dev-dependency only, and `presets.json` holds free-form
-//! user-editable maps that do not map onto a fixed struct anyway.
+//! JSON goes through `serde_json::Value`: `presets.json` is a free-form
+//! user-editable map rather than a fixed struct, but escape sequences and
+//! surrogate pairs are exactly where a hand-rolled reader silently loses
+//! someone's presets.
 
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -156,7 +158,7 @@ pub fn load_settings(d: &impl Deps, env: &Env) -> Settings {
     let Ok(bytes) = d.read_file(&resolve_settings_file(env)) else {
         return out;
     };
-    let Some(Value::Object(map)) = parse_json(&String::from_utf8_lossy(&bytes)) else {
+    let Some(map) = parse_json(&bytes) else {
         return out;
     };
 
@@ -210,7 +212,7 @@ pub fn save_settings(d: &impl Deps, env: &Env, settings: &Settings) -> Result<()
         "services".to_string(),
         Value::Array(settings.services.iter().cloned().map(Value::String).collect()),
     );
-    write_atomic(d, &resolve_settings_file(env), &to_json_bytes(&Value::Object(map)))
+    write_atomic(d, &resolve_settings_file(env), &to_json_bytes(&map))
 }
 
 // ---- presets ----
@@ -226,7 +228,7 @@ pub fn load_presets(d: &impl Deps, env: &Env) -> Presets {
     let Ok(bytes) = d.read_file(&resolve_presets_file(env)) else {
         return Presets::new();
     };
-    let Some(Value::Object(map)) = parse_json(&String::from_utf8_lossy(&bytes)) else {
+    let Some(map) = parse_json(&bytes) else {
         return Presets::new();
     };
     map.into_iter()
@@ -250,7 +252,7 @@ pub fn save_presets(d: &impl Deps, env: &Env, presets: &Presets) -> Result<(), A
             (name.clone(), Value::Object(inner))
         })
         .collect();
-    write_atomic(d, &resolve_presets_file(env), &to_json_bytes(&Value::Object(map)))
+    write_atomic(d, &resolve_presets_file(env), &to_json_bytes(&map))
 }
 
 /// Save one preset. **A name that already exists is a no-op** — it returns
@@ -327,361 +329,23 @@ fn storage_error(e: crate::deps::DepsError) -> AppError {
 }
 
 // ---- minimal JSON ----
-//
-// ponytail: hand-rolled reader/writer, ~120 lines, at the cost of not covering
-// exotic JSON. Ceiling: no big-int precision beyond f64, no streaming. If the
-// files ever need more, promote `serde_json` from dev-dependency and delete
-// this section — nothing outside it uses `Value`.
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Value {
-    Null,
-    Bool(bool),
-    Number(f64),
-    String(String),
-    Array(Vec<Value>),
-    Object(BTreeMap<String, Value>),
-}
-
-impl Value {
-    fn as_str(&self) -> Option<&str> {
-        match self {
-            Value::String(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    fn as_bool(&self) -> Option<bool> {
-        match self {
-            Value::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-}
-
-/// Parse a complete JSON document. `None` on any syntax error — corrupt input
-/// is a normal outcome here, not a bug to report.
-fn parse_json(text: &str) -> Option<Value> {
-    let mut p = Parser { b: text.as_bytes(), i: 0, depth: 0 };
-    p.ws();
-    let v = p.value().ok()?;
-    p.ws();
-    (p.i == p.b.len()).then_some(v)
-}
-
-/// Bounds the recursion so a hostile file cannot blow the stack.
-const MAX_DEPTH: usize = 64;
-
-struct Parser<'a> {
-    b: &'a [u8],
-    i: usize,
-    depth: usize,
-}
-
-impl Parser<'_> {
-    fn ws(&mut self) {
-        while self.b.get(self.i).is_some_and(u8::is_ascii_whitespace) {
-            self.i += 1;
-        }
-    }
-
-    fn value(&mut self) -> Result<Value, ()> {
-        if self.depth > MAX_DEPTH {
-            return Err(());
-        }
-        match self.b.get(self.i).copied().ok_or(())? {
-            b'{' => self.object(),
-            b'[' => self.array(),
-            b'"' => Ok(Value::String(self.string()?)),
-            b't' => self.literal("true", Value::Bool(true)),
-            b'f' => self.literal("false", Value::Bool(false)),
-            b'n' => self.literal("null", Value::Null),
-            _ => self.number(),
-        }
-    }
-
-    fn literal(&mut self, word: &str, v: Value) -> Result<Value, ()> {
-        if self.b[self.i..].starts_with(word.as_bytes()) {
-            self.i += word.len();
-            Ok(v)
-        } else {
-            Err(())
-        }
-    }
-
-    fn object(&mut self) -> Result<Value, ()> {
-        self.i += 1;
-        self.depth += 1;
-        let mut map = BTreeMap::new();
-        let r = self.key_values(&mut map);
-        self.depth -= 1;
-        r.map(|()| Value::Object(map))
-    }
-
-    fn key_values(&mut self, map: &mut BTreeMap<String, Value>) -> Result<(), ()> {
-        self.ws();
-        if self.b.get(self.i) == Some(&b'}') {
-            self.i += 1;
-            return Ok(());
-        }
-        loop {
-            self.ws();
-            if self.b.get(self.i) != Some(&b'"') {
-                return Err(());
-            }
-            let key = self.string()?;
-            self.ws();
-            if self.b.get(self.i) != Some(&b':') {
-                return Err(());
-            }
-            self.i += 1;
-            self.ws();
-            map.insert(key, self.value()?);
-            self.ws();
-            match self.b.get(self.i) {
-                Some(&b',') => self.i += 1,
-                Some(&b'}') => {
-                    self.i += 1;
-                    return Ok(());
-                }
-                _ => return Err(()),
-            }
-        }
-    }
-
-    fn array(&mut self) -> Result<Value, ()> {
-        self.i += 1;
-        self.depth += 1;
-        let mut items = Vec::new();
-        let r = self.items(&mut items);
-        self.depth -= 1;
-        r.map(|()| Value::Array(items))
-    }
-
-    fn items(&mut self, items: &mut Vec<Value>) -> Result<(), ()> {
-        self.ws();
-        if self.b.get(self.i) == Some(&b']') {
-            self.i += 1;
-            return Ok(());
-        }
-        loop {
-            self.ws();
-            items.push(self.value()?);
-            self.ws();
-            match self.b.get(self.i) {
-                Some(&b',') => self.i += 1,
-                Some(&b']') => {
-                    self.i += 1;
-                    return Ok(());
-                }
-                _ => return Err(()),
-            }
-        }
-    }
-
-    /// A JSON string with escapes and surrogate pairs; raw UTF-8 kept as-is
-    /// (same as Python's `ensure_ascii=False`).
-    fn string(&mut self) -> Result<String, ()> {
-        self.i += 1; // opening quote
-        let mut out = String::new();
-        let mut run = self.i;
-        loop {
-            let c = self.b.get(self.i).copied().ok_or(())?;
-            match c {
-                b'"' => {
-                    out.push_str(self.slice(run, self.i)?);
-                    self.i += 1;
-                    return Ok(out);
-                }
-                b'\\' => {
-                    out.push_str(self.slice(run, self.i)?);
-                    self.i += 1;
-                    out.push(self.escape()?);
-                    run = self.i;
-                }
-                0..=0x1F => return Err(()),
-                _ => self.i += 1,
-            }
-        }
-    }
-
-    fn slice(&self, from: usize, to: usize) -> Result<&str, ()> {
-        std::str::from_utf8(&self.b[from..to]).map_err(|_| ())
-    }
-
-    fn escape(&mut self) -> Result<char, ()> {
-        let e = self.b.get(self.i).copied().ok_or(())?;
-        self.i += 1;
-        match e {
-            b'"' => Ok('"'),
-            b'\\' => Ok('\\'),
-            b'/' => Ok('/'),
-            b'b' => Ok('\u{8}'),
-            b'f' => Ok('\u{c}'),
-            b'n' => Ok('\n'),
-            b'r' => Ok('\r'),
-            b't' => Ok('\t'),
-            b'u' => self.unicode_escape(),
-            _ => Err(()),
-        }
-    }
-
-    fn hex4(&mut self) -> Result<u32, ()> {
-        let mut cp = 0u32;
-        for _ in 0..4 {
-            let h = self.b.get(self.i).copied().ok_or(())?;
-            cp = cp * 16
-                + match h {
-                    b'0'..=b'9' => (h - b'0') as u32,
-                    b'a'..=b'f' => (h - b'a' + 10) as u32,
-                    b'A'..=b'F' => (h - b'A' + 10) as u32,
-                    _ => return Err(()),
-                };
-            self.i += 1;
-        }
-        Ok(cp)
-    }
-
-    fn unicode_escape(&mut self) -> Result<char, ()> {
-        let hi = self.hex4()?;
-        let cp = if (0xD800..0xDC00).contains(&hi) {
-            if self.b.get(self.i..self.i + 2) != Some(b"\\u") {
-                return Err(());
-            }
-            self.i += 2;
-            let lo = self.hex4()?;
-            if !(0xDC00..0xE000).contains(&lo) {
-                return Err(());
-            }
-            0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
-        } else {
-            hi
-        };
-        char::from_u32(cp).ok_or(())
-    }
-
-    fn number(&mut self) -> Result<Value, ()> {
-        let start = self.i;
-        if self.b.get(self.i) == Some(&b'-') {
-            self.i += 1;
-        }
-        match self.b.get(self.i) {
-            Some(&b'0') => self.i += 1,
-            Some(c) if c.is_ascii_digit() => self.digits(),
-            _ => return Err(()),
-        }
-        if self.b.get(self.i) == Some(&b'.') {
-            self.i += 1;
-            if !self.b.get(self.i).is_some_and(|c| c.is_ascii_digit()) {
-                return Err(());
-            }
-            self.digits();
-        }
-        if matches!(self.b.get(self.i), Some(&b'e') | Some(&b'E')) {
-            self.i += 1;
-            if matches!(self.b.get(self.i), Some(&b'+') | Some(&b'-')) {
-                self.i += 1;
-            }
-            if !self.b.get(self.i).is_some_and(|c| c.is_ascii_digit()) {
-                return Err(());
-            }
-            self.digits();
-        }
-        self.slice(start, self.i)?.parse::<f64>().map(Value::Number).map_err(|_| ())
-    }
-
-    fn digits(&mut self) {
-        while self.b.get(self.i).is_some_and(|c| c.is_ascii_digit()) {
-            self.i += 1;
-        }
-    }
-}
-
-/// Serialize pretty-printed (`indent = 2`), like Python's `json.dump`.
-fn to_json_bytes(v: &Value) -> Vec<u8> {
-    let mut out = Vec::new();
-    write_value(&mut out, v, 0);
-    out
-}
-
-fn write_value(out: &mut Vec<u8>, v: &Value, indent: usize) {
+/// Parse a JSON object from bytes. `None` when unparseable or not an object —
+/// callers treat that as "fall back to defaults", never as an error.
+///
+/// Uses `serde_json::Value` rather than a hand-rolled reader: these are user
+/// preference files, and escape sequences / surrogate pairs / nesting depth are
+/// exactly where a hand-written parser silently loses someone's presets.
+fn parse_json(bytes: &[u8]) -> Option<BTreeMap<String, Value>> {
+    let v: Value = serde_json::from_slice(bytes).ok()?;
     match v {
-        Value::Null => out.extend_from_slice(b"null"),
-        Value::Bool(true) => out.extend_from_slice(b"true"),
-        Value::Bool(false) => out.extend_from_slice(b"false"),
-        Value::Number(n) => out.extend_from_slice(format_number(*n).as_bytes()),
-        Value::String(s) => write_json_string(out, s),
-        Value::Array(items) => {
-            if items.is_empty() {
-                out.extend_from_slice(b"[]");
-                return;
-            }
-            out.push(b'[');
-            for (n, item) in items.iter().enumerate() {
-                if n > 0 {
-                    out.push(b',');
-                }
-                newline_indent(out, indent + 1);
-                write_value(out, item, indent + 1);
-            }
-            newline_indent(out, indent);
-            out.push(b']');
-        }
-        Value::Object(map) => {
-            if map.is_empty() {
-                out.extend_from_slice(b"{}");
-                return;
-            }
-            out.push(b'{');
-            for (n, (key, val)) in map.iter().enumerate() {
-                if n > 0 {
-                    out.push(b',');
-                }
-                newline_indent(out, indent + 1);
-                write_json_string(out, key);
-                out.extend_from_slice(b": ");
-                write_value(out, val, indent + 1);
-            }
-            newline_indent(out, indent);
-            out.push(b'}');
-        }
+        Value::Object(map) => Some(map.into_iter().collect()),
+        _ => None,
     }
 }
 
-fn newline_indent(out: &mut Vec<u8>, indent: usize) {
+/// Serialize pretty-printed with indent 2, matching Python `json.dump`.
+fn to_json_bytes(map: &BTreeMap<String, Value>) -> Vec<u8> {
+    let mut out = serde_json::to_vec_pretty(&Value::Object(map.clone().into_iter().collect())).unwrap_or_default();
     out.push(b'\n');
-    out.extend(std::iter::repeat_n(b' ', indent * 2));
-}
-
-fn format_number(n: f64) -> String {
-    // Non-finite has no JSON spelling; `null` at least keeps the file parseable.
-    if !n.is_finite() {
-        return "null".to_string();
-    }
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        format!("{}", n as i64)
-    } else {
-        format!("{n}")
-    }
-}
-
-fn write_json_string(out: &mut Vec<u8>, s: &str) {
-    out.push(b'"');
-    for c in s.chars() {
-        match c {
-            '"' => out.extend_from_slice(b"\\\""),
-            '\\' => out.extend_from_slice(b"\\\\"),
-            '\n' => out.extend_from_slice(b"\\n"),
-            '\r' => out.extend_from_slice(b"\\r"),
-            '\t' => out.extend_from_slice(b"\\t"),
-            '\u{8}' => out.extend_from_slice(b"\\b"),
-            '\u{c}' => out.extend_from_slice(b"\\f"),
-            c if (c as u32) < 0x20 => out.extend_from_slice(format!("\\u{:04x}", c as u32).as_bytes()),
-            c => {
-                let mut buf = [0u8; 4];
-                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-            }
-        }
-    }
-    out.push(b'"');
+    out
 }

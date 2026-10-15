@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 encoding_rs = "0.8.42"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.154"
 
 [dev-dependencies]
 serde_json = "1.0.154"
