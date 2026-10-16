@@ -9,6 +9,12 @@ fn main() {
     // `longPathAware` are not decoration: the services view renders long
     // command lines, and without long-path awareness a service whose binary
     // lives past MAX_PATH is misreported as missing.
+    //
+    // Common-Controls v6 is the one that bit us: `TaskDialogIndirect` — which
+    // Tauri's dialogs and the WebView2 bootstrap call — exists only in
+    // comctl32 v6, and Windows picks the version from this manifest. Without
+    // the dependency the process dies at startup with
+    // "无法定位程序输入点 TaskDialogIndirect", before any window is created.
     tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(
         tauri_build::WindowsAttributes::new().app_manifest(
             r#"
@@ -20,6 +26,18 @@ fn main() {
       </requestedPrivileges>
     </security>
   </trustInfo>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
