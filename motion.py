@@ -168,6 +168,7 @@ class Animator:
         self._frames: Dict[int, int] = {}
         self._next_id = 0
         self._last_frame_ms = 0.0  # 上一次帧回调实际耗时（用 now 时钟测量）
+        self._last_slow_at = 0.0   # 上一次慢帧的时刻（降级会随时间衰减，不再永久生效）
 
     # -- 内部工具 ----------------------------------------------------------
 
@@ -176,7 +177,22 @@ class Animator:
         return self._last_frame_ms
 
     def _should_degrade(self) -> bool:
-        return len(self._active) > self.max_active or self._last_frame_ms > self.frame_budget_ms
+        """是否降级为瞬时完成。
+
+        _last_frame_ms 曾被永久保留：任何一次 >50ms 的帧（拖窗、GC、杀软扫描、
+        首帧）会让**本次会话之后所有动画**都退化为瞬跳，且没有任何恢复路径。
+        改为只在「刚刚发生过慢帧」的短时间内降级（时间窗约 1 秒，按帧耗时估算）——
+        持续卡顿时仍会降级保护，但一次偶发慢帧不再永久废掉动效。
+        """
+        if len(self._active) > self.max_active:
+            return True
+        if self._last_frame_ms <= self.frame_budget_ms:
+            return False
+        # 慢帧记忆随时间衰减：距上次慢帧超过约 1 秒即恢复动画
+        if self.now() - getattr(self, "_last_slow_at", 0.0) > 1.0:
+            self._last_frame_ms = 0.0
+            return False
+        return True
 
     def _instant(self, callback: Callable[[float], None],
                  on_done: Optional[Callable[[], None]]) -> None:
@@ -204,6 +220,8 @@ class Animator:
             print(f"[motion] anim {anim_id} callback 异常: {sys.exc_info()[1]}",
                   file=sys.stderr)
         self._last_frame_ms = max(0.0, (self.now() - t0) * 1000.0)
+        if self._last_frame_ms > self.frame_budget_ms:
+            self._last_slow_at = self.now()   # 记录慢帧时刻，供 _should_degrade 衰减
         if p >= 1.0:
             # 先出注册表，on_done 里再开新动画不受影响
             self._active.pop(anim_id, None)
