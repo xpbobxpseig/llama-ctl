@@ -1,34 +1,14 @@
-# build.ps1 — 可复现打包：干净 venv → 装依赖 → PyInstaller
-# 用法: pwsh -File build.ps1
-# 目的: 避免构建机全局环境（numpy/playwright/yt_dlp…）被 PyInstaller 拖进包体
+# build.ps1 — 已被取代（superseded）
+#
+# 本脚本是旧 PyInstaller 打包入口（venv → pip install → PyInstaller llama_ctl.spec）。
+# 桌面端现为 Tauri 2 + Vue 3 应用，打包入口改为：
+#
+#   cd frontend && npm install && npm run build
+#   cd ..\src-tauri && cargo tauri build      # 产出 NSIS 安装包
+#
+# 见 README.md「构建」一节。本文件保留仅为历史参考，不再维护、不再使用。
+# ponytail: 确认无人引用后可直接删除本文件。
 $ErrorActionPreference = 'Stop'
-Set-Location $PSScriptRoot
-
-$venv = Join-Path $PSScriptRoot '.venv'
-$py   = Join-Path $venv 'Scripts\python.exe'
-
-if (-not (Test-Path $py)) {
-    Write-Host '==> 创建 .venv'
-    # 固定 3.10：`py -3` 会解析到最新版（本机 3.14），该版本尚未随附本项目依赖，
-    # 会得到缺 customtkinter/PyInstaller 的构建环境。需要换版本时设 LLAMA_CTL_PY。
-    $ver = if ($env:LLAMA_CTL_PY) { $env:LLAMA_CTL_PY } else { '3.10' }
-    py "-$ver" -m venv $venv
-}
-
-Write-Host '==> 安装依赖'
-& $py -m pip install --upgrade pip | Out-Null
-& $py -m pip install -r requirements.txt
-
-Write-Host '==> 清理旧产物'
-Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-
-Write-Host '==> PyInstaller 打包'
-& $py -m PyInstaller llama_ctl.spec --noconfirm
-
-$exe = Join-Path $PSScriptRoot 'dist\llama_ctl.exe'
-if (Test-Path $exe) {
-    $mb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
-    Write-Host "==> 完成: dist\llama_ctl.exe ($mb MB)"
-} else {
-    throw '打包失败：未生成 dist\llama_ctl.exe'
-}
+Write-Host 'build.ps1 已被取代：请使用 README.md 中的 cargo tauri build 流程。' -ForegroundColor Yellow
+Write-Host '(旧流程：clean venv -> pip install -> PyInstaller llama_ctl.spec)' -ForegroundColor DarkGray
+exit 1

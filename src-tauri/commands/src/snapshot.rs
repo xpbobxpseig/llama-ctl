@@ -189,7 +189,13 @@ impl App {
             facts: FactsCache::new(),
             env,
             install_env,
-            services: settings.services.clone(),
+            // Seeded through the same rule the GUI used, so the first frame
+            // already has a usable dropdown even when the cache predates the
+            // currently selected service.
+            services: first_paint_services(
+                &first_service(&settings.services).unwrap_or_default(),
+                &settings.services,
+            ),
             selected: first_service(&settings.services).unwrap_or_default(),
             preset_loaded: String::new(),
             pending: None,
@@ -227,6 +233,26 @@ fn first_service(names: &[String]) -> Option<String> {
     names.iter().find(|n| !n.is_empty()).cloned()
 }
 
+/// The dropdown's first-frame contents: the cached list in its own order, with
+/// `current` moved to the front when the cache does not already contain it.
+///
+/// Ported from `llama_ctl_gui.py::_first_paint_services`. Two rules matter:
+/// a cached list is shown verbatim (the user's last ordering), and a current
+/// service the cache has never seen — newly installed, or renamed while we
+/// were away — is prepended rather than dropped, so the form is never blank
+/// on a machine whose cache predates the service.
+pub fn first_paint_services(current: &str, cached: &[String]) -> Vec<String> {
+    let cached: Vec<String> = cached.iter().filter(|n| !n.is_empty()).cloned().collect();
+    if cached.iter().any(|n| n == current) {
+        return cached;
+    }
+    let mut out = Vec::with_capacity(cached.len() + 1);
+    if !current.is_empty() {
+        out.push(current.to_string());
+    }
+    out.extend(cached);
+    out
+}
 // ---- reads -----------------------------------------------------------------
 
 /// Build a snapshot: everything one screen needs.

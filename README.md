@@ -26,23 +26,30 @@
 
 - **Windows**（依赖系统 `nssm.exe`、`sc`、`powershell`）
 - 已安装 [NSSM](https://nssm.cc/) 并已把 llama.cpp 注册为服务
-- 使用预编译 exe 时**无需 Python**
+- 从源码构建需要 Rust ≥ 1.85（`src-tauri\Cargo.toml` 的 `rust-version`）、Node.js 与 npm，以及 `cargo install tauri-cli`（2.x）
 
 ### 安装与使用
 
-**方式一（推荐）：下载发布版 exe**
+**方式一（推荐）：下载发布版安装包**
 
-1. 到 [Releases](https://github.com/xpbobxpseig/llama-ctl/releases) 下载 `llama_ctl.exe`
-2. 双击运行。单文件，无需 Python 环境。
+1. 到 [Releases](https://github.com/xpbobxpseig/llama-ctl/releases) 下载 NSIS 安装包（`.exe`）
+2. 双击运行。安装后无需 Python、无需 Rust 环境。
 
-**方式二：从源码运行**
+**方式二：从源码构建并运行**
+
+桌面端是 **Tauri 2 + Vue 3** 应用（`src-tauri\` + `frontend\`），构建入口是 `cargo tauri`：
 
 ```
-pip install -r requirements.txt
-python llama_ctl_gui.py
+cd frontend
+npm install
+npm run build          # 产出 frontend\dist，即 tauri.conf.json 的 frontendDist
+
+cd ..\src-tauri
+cargo tauri dev        # 开发模式：自动起 Vite dev server（devUrl http://localhost:5173）
+cargo tauri build      # 打包：产出 NSIS 安装包（bundle.targets = ["nsis"]）
 ```
 
-或双击 `llama_ctl.bat`（自动切到脚本所在目录）。
+> 需要先 `cargo install tauri-cli --version "^2"`；本机尚未安装（`cargo tauri --version` 报 no such command），因此上述命令本节未实际跑通验证。
 
 ### 环境变量（可选）
 
@@ -120,18 +127,17 @@ NSSM 输出为 UTF-16LE（`sc` 为本地代码页 GBK）。工具按字节特征
 ### 构建
 
 ```
-pwsh -File build.ps1
+cd frontend && npm install && npm run build
+cd ..\src-tauri && cargo tauri build
 ```
 
-脚本会创建干净 venv（默认 Python 3.10，可用环境变量 `LLAMA_CTL_PY` 覆盖版本）、安装 `requirements.txt`、清理旧产物，然后调用 PyInstaller。产物为 `dist\llama_ctl.exe`（单文件，约 12 MB）。
+`cargo tauri build` 会先跑 `beforeBuildCommand`（`npm run build`）再编译 Rust，并按 `src-tauri\tauri.conf.json` 的 `bundle.targets = ["nsis"]` 产出 NSIS 安装包（简体中文 + 英文语言选择，`installMode: both`）。产物落在 `src-tauri\target\release\bundle\nsis\`。
 
-手动等价命令：
+开发模式用 `cargo tauri dev`：它会先跑 `beforeDevCommand`（`npm run dev`）起 Vite（默认 `http://localhost:5173`，即 `devUrl`）。
 
-```
-python -m PyInstaller llama_ctl.spec --noconfirm
-```
+先决条件：`cargo install tauri-cli --version "^2"`。
 
-> 用干净的 venv 构建可避免构建机全局环境（numpy / playwright / yt_dlp 等）被 PyInstaller 拖进包体。
+> **本机构建状态**：`cargo tauri` 未安装（`cargo tauri --version` 报 no such command），所以上述构建命令**尚未在本机实际跑通**，产物路径是按 `tauri.conf.json` 推导的、未经实测。本机 `src-tauri\target\` 下目前只有 debug 产物，没有 NSIS 包。
 
 ### 测试
 
@@ -139,7 +145,7 @@ python -m PyInstaller llama_ctl.spec --noconfirm
 python -m pytest -q
 ```
 
-157 个用例，覆盖参数解析、语义等价、i18n、动效引擎、NSSM 事实读取（含 0 spawn 断言）、更新安装序列与回滚、首帧渲染。
+136 个用例，覆盖参数解析、语义等价、i18n、预设读写、NSSM 事实读取（含 0 spawn 断言）、更新安装序列与回滚。Rust 侧另有 `cargo test`（`src-tauri\`）。
 
 ### 安全
 
@@ -178,23 +184,30 @@ A general-purpose Windows GUI that directly drives **any** llama.cpp service man
 
 - **Windows** (depends on the system `nssm.exe`, `sc`, and `powershell`)
 - [NSSM](https://nssm.cc/) installed, with llama.cpp already registered as a service
-- **No Python needed** when using the prebuilt exe
+- Building from source needs Rust ≥ 1.85 (`rust-version` in `src-tauri\Cargo.toml`), Node.js and npm, plus `cargo install tauri-cli` (2.x)
 
 ### Install & Use
 
-**Option 1 (recommended): download the released exe**
+**Option 1 (recommended): download the released installer**
 
-1. Grab `llama_ctl.exe` from [Releases](https://github.com/xpbobxpseig/llama-ctl/releases)
-2. Double-click it. Single file, no Python environment required.
+1. Grab the NSIS installer (`.exe`) from [Releases](https://github.com/xpbobxpseig/llama-ctl/releases)
+2. Double-click it. Once installed, no Python or Rust environment is required.
 
-**Option 2: run from source**
+**Option 2: build and run from source**
+
+The desktop app is **Tauri 2 + Vue 3** (`src-tauri\` + `frontend\`); the build entry point is `cargo tauri`:
 
 ```
-pip install -r requirements.txt
-python llama_ctl_gui.py
+cd frontend
+npm install
+npm run build          # emits frontend\dist, i.e. frontendDist in tauri.conf.json
+
+cd ..\src-tauri
+cargo tauri dev        # dev mode: starts the Vite dev server (devUrl http://localhost:5173)
+cargo tauri build      # package: emits an NSIS installer (bundle.targets = ["nsis"])
 ```
 
-Or double-click `llama_ctl.bat` (it switches to the script's own directory first).
+> Requires `cargo install tauri-cli --version "^2"` first; it is not installed on this machine (`cargo tauri --version` reports "no such command"), so the commands above have not actually been run and verified here.
 
 ### Environment variables (optional)
 
@@ -272,18 +285,17 @@ The "Apply changes" button itself still compares **textually** when deciding whe
 ### Build
 
 ```
-pwsh -File build.ps1
+cd frontend && npm install && npm run build
+cd ..\src-tauri && cargo tauri build
 ```
 
-The script creates a clean venv (Python 3.10 by default, version overridable with `LLAMA_CTL_PY`), installs `requirements.txt`, clears old artifacts, and runs PyInstaller. The output is `dist\llama_ctl.exe` (single file, ~12 MB).
+`cargo tauri build` runs `beforeBuildCommand` (`npm run build`) first, then compiles Rust, and emits an NSIS installer per `bundle.targets = ["nsis"]` in `src-tauri\tauri.conf.json` (Simplified Chinese + English language selector, `installMode: both`). Output lands in `src-tauri\target\release\bundle\nsis\`.
 
-Manual equivalent:
+For development, `cargo tauri dev` runs `beforeDevCommand` (`npm run dev`) and starts Vite (`http://localhost:5173`, the configured `devUrl`).
 
-```
-python -m PyInstaller llama_ctl.spec --noconfirm
-```
+Prerequisite: `cargo install tauri-cli --version "^2"`.
 
-> Building inside a clean venv keeps the build machine's global packages (numpy / playwright / yt_dlp, …) from being pulled into the bundle by PyInstaller.
+> **Status on this machine**: `cargo tauri` is not installed (`cargo tauri --version` reports "no such command"), so these build commands have **not actually been run here**; the output path is derived from `tauri.conf.json` and is unverified. `src-tauri\target\` currently holds only debug artifacts — there is no NSIS bundle.
 
 ### Test
 
@@ -291,7 +303,7 @@ python -m PyInstaller llama_ctl.spec --noconfirm
 python -m pytest -q
 ```
 
-157 test cases covering parameter parsing, semantic equivalence, i18n, the motion engine, NSSM fact reads (including a zero-spawn assertion), the update-install sequence and rollback, and first paint.
+136 test cases covering parameter parsing, semantic equivalence, i18n, preset read/write, NSSM fact reads (including a zero-spawn assertion), the update-install sequence and rollback. The Rust side has its own `cargo test` (in `src-tauri\`).
 
 ### Security
 

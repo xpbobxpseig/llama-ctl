@@ -1044,3 +1044,39 @@ fn the_field_table_parses_and_rebuilds_a_real_parameter_string() {
     assert!(semantically_equal(&rebuilt, text, &fs), "{rebuilt}");
     assert!(rebuilt.contains("--no-jinja"), "the negation is emitted explicitly: {rebuilt}");
 }
+
+// ---- the first-frame dropdown ----------------------------------------------
+//
+// Ported from tests/test_first_paint.py: the order the dropdown shows on the
+// very first frame, before any enumeration has happened.
+
+#[test]
+fn an_empty_cache_shows_only_the_current_service() {
+    assert_eq!(cmd::first_paint_services("Svc", &[]), vec!["Svc".to_string()]);
+}
+
+#[test]
+fn a_cache_hit_keeps_the_cached_order() {
+    let cached = ["A".to_string(), "B".to_string(), "C".to_string()];
+    assert_eq!(cmd::first_paint_services("B", &cached), cached);
+}
+
+#[test]
+fn a_cache_miss_prepends_the_current_service() {
+    // Newly installed, or renamed while we were away: the current service must
+    // appear rather than the dropdown painting a form for nothing.
+    let cached = ["A".to_string(), "B".to_string()];
+    assert_eq!(
+        cmd::first_paint_services("Z", &cached),
+        vec!["Z".to_string(), "A".to_string(), "B".to_string()]
+    );
+}
+
+#[test]
+fn empty_entries_are_dropped_from_the_cached_list() {
+    let cached = ["".to_string(), "A".to_string(), "".to_string()];
+    assert_eq!(
+        cmd::first_paint_services("Svc", &cached),
+        vec!["Svc".to_string(), "A".to_string()]
+    );
+}

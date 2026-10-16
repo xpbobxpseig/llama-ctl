@@ -43,8 +43,11 @@
     "icon": ["icons/llama_icon.ico"],
     "windows": {
       "nsis": {
-        "installMode": "currentUser",
-        "languages": ["SimpChinese", "English"]
+        "installMode": "both",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true,
+        "compression": "lzma",
+        "startMenuFolder": "llama-ctl"
       }
     }
   }
