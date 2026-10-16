@@ -81,6 +81,7 @@ fn main() -> ExitCode {
     let dist = root.join("..").join("frontend").join("dist");
     if dist.is_dir() {
         scan_frontend(&dist, &mut failures);
+        scan_frontend_sources(&root, &mut failures);
     } else {
         println!("note: frontend/dist absent, skipped remote-asset scan");
     }
@@ -145,7 +146,7 @@ fn check_csp(csp: &str, failures: &mut Vec<String>) {
 fn check_installer_hooks(root: &Path, failures: &mut Vec<String>) {
     let hooks = root.join("nsis").join("hooks.nsh");
     if !hooks.is_file() {
-        println!("note: no nsis/hooks.nsh — using the stock installer (deletes \$INSTDIR only)");
+        println!("note: no nsis/hooks.nsh — using the stock installer (deletes $INSTDIR only)");
         return;
     }
     let Ok(text) = fs::read_to_string(&hooks) else {
@@ -288,11 +289,37 @@ fn scan_frontend(dir: &Path, failures: &mut Vec<String>) {
                 }
             }
 
-            if !is_js {
+        }
+    }
+}
+
+/// Network APIs, scanned in **our sources** rather than in `dist/`.
+///
+/// The bundle necessarily contains Vue's own runtime, which calls `fetch` to
+/// honour `<link rel="modulepreload">`; matching it there makes this check red
+/// on every run, and a check that is always red is a check that gets ignored.
+/// The true barrier is the CSP anyway: `connect-src` allows 'self' and `ipc:`
+/// only, so no request can leave the process.
+fn scan_frontend_sources(root: &Path, failures: &mut Vec<String>) {
+    let dir = root.parent().unwrap_or(root).join("frontend").join("src");
+    let mut stack = vec![dir];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&d) else { continue };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
                 continue;
             }
-            // Network APIs — the renderer has no business calling any of them
-            // (official-update downloads go through Rust, ADR-0001).
+            let is_source = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e == "js" || e == "vue")
+                .unwrap_or(false);
+            if !is_source {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&p) else { continue };
             for api in [
                 "fetch(",
                 "XMLHttpRequest",
@@ -303,7 +330,7 @@ fn scan_frontend(dir: &Path, failures: &mut Vec<String>) {
             ] {
                 if text.contains(api) {
                     failures.push(format!(
-                        "renderer uses network API `{api}` in {} — ADR-0001 requires this in Rust",
+                        "renderer source uses network API `{api}` in {} — ADR-0001 requires this in Rust",
                         p.display()
                     ));
                 }

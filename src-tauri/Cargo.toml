@@ -13,6 +13,15 @@ build = "build.rs"
 name = "llama_ctl_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Two binaries live here — the app (src/main.rs) and the packaging checker
+# (src/bin/check_packaging.rs) — so Cargo cannot guess which one
+# `cargo tauri build` should bundle, and the bundler refuses to proceed.
+default-run = "llama-ctl"
+
+[[bin]]
+name = "llama-ctl"
+path = "src/main.rs"
+
 [dependencies]
 llama-ctl-commands = { path = "./commands" }
 llama-ctl-core = { path = "./core" }
