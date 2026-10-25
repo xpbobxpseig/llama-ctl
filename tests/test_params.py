@@ -16,7 +16,8 @@ def _fields():
          "min": 512, "max": 1048576, "step": 512, "default": 131072,
          "label": "上下文长度"},
         {"key": "ctk", "kind": "combo", "aliases": ["--cache-type-k", "-ctk"]},
-        {"key": "jinja", "kind": "check", "aliases": ["--jinja"]},
+        {"key": "jinja", "kind": "check", "aliases": ["--jinja"],
+         "off_aliases": ["--no-jinja"]},
         {"key": "no_mmap", "kind": "check", "aliases": ["--no-mmap"]},
         {"key": "spec_type", "kind": "combo", "aliases": ["--spec-type"]},
         {"key": "spec_draft_model", "kind": "path", "aliases": ["--spec-draft-model"]},
@@ -122,21 +123,23 @@ def test_draft_fields_only_in_draft_mode():
 # --- 引号与 roundtrip ---
 
 def test_split_args_handles_quoted_json():
-    # 裸 JSON 含空格会被切开（生产行为如此）；build 时 _quote 会给含空格值加引号
-    assert split_args('{"a b":1}') == ['{"a', 'b":1}']
-    # 带引号的 JSON 完整往返
+    # 引号按 Windows CRT 规则成对开关，不在引号内的空白才分隔参数。
+    # 裸 JSON 的引号是分隔符（会被吃掉），故 {"a b":1} → 单个参数 {a b:1}。
+    assert split_args('{"a b":1}') == ['{a b:1}']
+    # 带转义引号的 JSON 完整往返
     assert split_args('"{\\"a b\\":1}"') == ['{"a b":1}']
 
 
 def test_full_roundtrip_stable():
-    # 含空格目录 + 反斜杠的真实路径：T1/T2 修复后必须真正无损（不再“错误自洽”）
+    # 含空格目录 + 反斜杠的真实路径：Windows 只把「紧邻引号」的反斜杠当转义，
+    # 所以重建文本必须保留单反斜杠，否则 CommandLineToArgvW 会给出双反斜杠路径。
     path = 'C:\\Models\\My Model\\qwen.gguf'  # 单反斜杠路径
     text = '--model "%s" --ctx-size 131072 --cache-type-k q8_0 --jinja' % path
     vals, extras, _ = parse_params(text, F)
     assert vals["model"] == path  # 解析侧反斜杠无损
     rebuilt = build_params(vals, extras, F)
     assert 'My Model' in rebuilt  # 空格目录保留
-    assert path.replace("\\", "\\\\") in rebuilt  # 转义形式：完整路径在重建文本中
+    assert '"%s"' % path in rebuilt  # 单反斜杠 + 引号包裹（唯一能被 Windows 还原的写法）
     v2, e2, _ = parse_params(rebuilt, F)
     assert v2 == vals and e2 == extras  # 二次解析稳定
     assert v2["model"] == path  # 单反斜杠真正无损往返
@@ -215,8 +218,8 @@ def test_quoted_path_roundtrip():
     vals, extras, _ = parse_params(text, F)
     assert vals["model"] == 'C:\\Models\\My Model\\qwen.gguf'
     rebuilt = build_params(vals, extras, F)
-    # build 对含空格值加引号并转义反斜杠，重建文本应包含完整路径（转义形式）
-    assert 'C:\\\\Models\\\\My Model\\\\qwen.gguf' in rebuilt
+    # 含空格值加引号；反斜杠原样保留（翻倍会被 Windows 还原成双反斜杠）
+    assert '"C:\\Models\\My Model\\qwen.gguf"' in rebuilt
     v2, e2, _ = parse_params(rebuilt, F)
     assert v2 == vals and e2 == extras
 
@@ -249,11 +252,12 @@ def test_semantically_equal_slider_default_missing_vs_explicit():
     assert semantically_equal(a, b, F)
 
 
-def test_semantically_equal_quoted_and_escaped_paths():
-    # 引号/转义写法差异：解析后是同一路径
+def test_semantically_not_equal_escaped_vs_literal_backslashes():
+    # 反斜杠翻倍在 Windows 下**不是**等价写法：CommandLineToArgvW 会把
+    # "C:\\\\Models\\\\..." 还原成双反斜杠路径，是另一条路径，必须判为不等价。
     a = '--model "C:\\Models\\My Model\\q.gguf" --ctx-size 8192'
     b = '--model "C:\\\\Models\\\\My Model\\\\q.gguf" --ctx-size 8192'
-    assert semantically_equal(a, b, F)
+    assert not semantically_equal(a, b, F)
 
 
 def test_semantically_not_equal_real_value_diff():
@@ -261,7 +265,17 @@ def test_semantically_not_equal_real_value_diff():
 
 
 def test_semantically_not_equal_check_flag_toggle():
-    assert not semantically_equal("--model m.gguf --jinja", "--model m.gguf", F)
+    # 用默认**关闭**的开关：写了 --no-mmap 与完全不写，实跑行为不同 → 必须检出。
+    # （不能用 --jinja：官方 `--jinja, --no-jinja` 默认开启，缺省即等于写了
+    #   --jinja，两者语义确实相同，见 test_pair_switch_defaults_on_when_absent。）
+    assert not semantically_equal("--model m.gguf --no-mmap", "--model m.gguf", F)
+
+
+def test_semantically_equal_default_on_pair_switch_absent_vs_explicit():
+    # --jinja 默认开启：显式写 --jinja 与不写，实跑一致 → 判等价（不误报未应用更改）
+    assert semantically_equal("--model m.gguf --jinja", "--model m.gguf", F)
+    # 而显式关闭是真实差异 → 必须检出
+    assert not semantically_equal("--model m.gguf --no-jinja", "--model m.gguf", F)
 
 
 def test_semantically_not_equal_extras_added_or_removed():
@@ -304,3 +318,101 @@ def test_semantically_equal_other_tool_short_flags():
     a = "-m m.gguf -ngl 99 -c 8192 --host 0.0.0.0 --port 8080"
     b = build_params(*parse_params(a, _alias_fields())[:2], _alias_fields())
     assert semantically_equal(a, b, _alias_fields())
+
+
+# ---------------------------------------------------------------------------
+# 重建值的转义不变量
+#
+# 判据是 Windows 的 CommandLineToArgvW（llama-server 实际收到的 argv）。
+# split_args 已实测与其逐字节一致，故此处用它做本地代理：
+#     split_args(build_params(...)) 必须还原出原值。
+# 该不变量曾被破坏：_quote 把值内所有反斜杠翻倍，于是 "\\NAS\share" 写回后
+# Windows 实际收到 "\\\\NAS\\share"，UNC 前缀语义改变。
+# ---------------------------------------------------------------------------
+
+NASTY_VALUES = [
+    r"\\NAS\share\q.gguf",           # UNC：前缀两个反斜杠不能被吃掉
+    r"\\?\F:\AI_Model\q.gguf",       # 扩展长度路径前缀
+    r"C:\Models\My Model\q.gguf",    # 含空格
+    "C:\\Models\\",                  # 尾随反斜杠：不翻倍会吃掉收尾引号
+    "C:\\Models\\\\",                # 尾随双反斜杠
+    '{"enable_thinking":false}',     # 含引号的 JSON
+    'say "hi" C:\\tmp\\note',        # 引号 + 反斜杠混合
+    "C:\\a b\\c\"d\\e.gguf",         # 空格 + 内嵌引号
+]
+
+
+def test_quoted_values_survive_reparse():
+    """任意含空格/反斜杠/引号的值，写回→再解析必须还原原值。"""
+    for value in NASTY_VALUES:
+        vals = {f["key"]: "" for f in F}
+        vals["model"] = value
+        text = build_params(vals, [], F)
+        toks = split_args(text)
+        assert "--model" in toks, "标志丢失: %s" % text
+        got = toks[toks.index("--model") + 1]
+        assert got == value, "转义把值改坏了：%r -> %r（文本 %s）" % (value, got, text)
+
+
+def test_unc_prefix_not_collapsed():
+    """UNC 前缀 \\\\ 必须原样存活（曾被 _quote 的全局翻倍破坏）。"""
+    value = r"\\NAS\share dir\q.gguf"
+    vals = {f["key"]: "" for f in F}
+    vals["model"] = value
+    text = build_params(vals, [], F)
+    assert split_args(text)[1] == value
+    # 反斜杠总数守恒：翻倍会让它变多，吃掉会变少
+    assert text.count("\\") == value.count("\\"), "反斜杠数量被改写: %s" % text
+
+
+# ---------------------------------------------------------------------------
+# 回归：extra 不得改变「重复参数以最后一个为准」的语义
+#
+# 根因：parse_params 把不认识的拼写（含官方否定形式 --no-jinja）塞进 extras，
+# build_params 又把 extras 追加到末尾，于是写回后靠后的否定形式反超前面的
+# --jinja —— 用户只改无关字段点一次「应用更改」，开关就被静默翻掉。
+# ---------------------------------------------------------------------------
+
+def test_negative_form_is_field_not_extra():
+    """官方成对开关的否定形式必须被识别成字段值，不能落进 extras。"""
+    vals, extras, _ = parse_params("--jinja --no-jinja --model m.gguf", F)
+    assert extras == [], "否定形式不得进入 extras（否则会被挪到末尾反转语义）"
+    assert vals["jinja"] == ""          # 后者胜出：关闭
+
+
+def test_negative_form_wins_when_last():
+    """--no-jinja 在前、--jinja 在后 → 开启（llama.cpp 以最后一个为准）。"""
+    vals, extras, _ = parse_params("--no-jinja --jinja --model m.gguf", F)
+    assert vals["jinja"] == "1" and extras == []
+
+
+def test_disabled_pair_flag_emits_negation():
+    """取消勾选默认开启的开关，必须显式写出否定形式，否则实跑等于没关。"""
+    vals = {f["key"]: "" for f in F}
+    assert "--no-jinja" in build_params(vals, [], F)
+    vals["jinja"] = "1"
+    assert "--no-jinja" not in build_params(vals, [], F)
+    assert "--jinja" in build_params(vals, [], F)
+
+
+def test_pair_switch_defaults_on_when_absent():
+    """两个形式都没出现时按「默认开启」处理（llama.cpp 对 --jinja 的既有默认）。"""
+    vals, _, _ = parse_params("--model m.gguf", F)
+    assert vals["jinja"] == "1"
+
+
+def test_extras_order_does_not_flip_a_recognized_flag():
+    """写回不得反转任一已识别开关的生效方向（本 bug 的端到端回归）。
+
+    用官方文档里成对出现的 `--jinja, --no-jinja`（实测 `--help` 有这一行；
+    `--mmap` 并非本构建的合法参数，故不拿它当例子）。
+    """
+    text = "--no-jinja --jinja --model m.gguf"   # 生效 --jinja（最后为准）
+    vals, extras, _ = parse_params(text, F)
+    rebuilt = build_params(vals, extras, F)
+    assert vals["jinja"] == "1"
+    # 写回后 --jinja 仍须在 --no-jinja 之后（或后者根本不出现），否则生效方向被反转
+    toks = rebuilt.split()
+    if "--no-jinja" in toks and "--jinja" in toks:
+        assert toks.index("--jinja") > toks.index("--no-jinja")
+    assert "--no-jinja" not in toks

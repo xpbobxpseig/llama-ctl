@@ -1,0 +1,1117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llama.cpp Service Console · 字体与图标规范</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --surface: #ffffff;
+      --surface-2: #eef0f3;
+      --surface-3: #e4e7eb;
+      --fg: #18181b;
+      --muted: #5f5f66;
+      --border: #d9d9de;
+      --border-strong: #b9bbc2;
+      --accent: #0b5cb0;
+      --ok: #0f7b3d;
+      --warn: #9a5b00;
+      --error: #c2261c;
+      --dark-bg: #111113;
+      --dark-surface: #18181b;
+      --dark-surface-2: #232328;
+      --dark-fg: #f4f4f5;
+      --dark-muted: #8e8e97;
+      --dark-border: #35353c;
+      --dark-accent: #4da3ff;
+      --dark-ok: #4ade80;
+      --dark-warn: #fbbf24;
+      --dark-error: #ff6b61;
+      --font-display: "Microsoft YaHei UI", "Segoe UI Variable Text", "Segoe UI", "Noto Sans SC", sans-serif;
+      --font-ui: "Microsoft YaHei UI", "Segoe UI Variable Text", "Segoe UI", "Noto Sans SC", sans-serif;
+      --font-latin: "Segoe UI Variable Text", "Segoe UI", "Noto Sans SC", sans-serif;
+      --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+      --type-display-size: 18px;
+      --type-display-line: 24px;
+      --type-section-size: 16px;
+      --type-section-line: 22px;
+      --type-group-size: 14px;
+      --type-group-line: 20px;
+      --type-body-size: 13px;
+      --type-body-line: 20px;
+      --type-label-size: 12px;
+      --type-label-line: 18px;
+      --type-micro-size: 11px;
+      --type-micro-line: 16px;
+      --type-mono-size: 13px;
+      --type-mono-line: 20px;
+      --glyph-cutout: #ffffff;
+      --radius: 8px;
+      --shadow: 0 12px 34px rgba(24, 24, 27, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: light; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-ui);
+      font-size: var(--type-body-size);
+      line-height: var(--type-body-line);
+      letter-spacing: 0;
+      text-rendering: optimizeLegibility;
+    }
+
+    a { color: inherit; }
+    code, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums slashed-zero; }
+    button, input, select { font: inherit; }
+
+    .shell {
+      width: min(1540px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 28px 0 72px;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      padding: 28px 0 26px;
+      border-bottom: 1px solid var(--border-strong);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-family: var(--font-latin);
+      font-size: var(--type-micro-size);
+      font-weight: 600;
+      line-height: var(--type-micro-line);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 780px;
+      margin-bottom: 10px;
+      font-family: var(--font-display);
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 600;
+      line-height: 1.28;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      max-width: 74ch;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .meta-block {
+      min-width: 260px;
+      padding: 16px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 22px rgba(24, 24, 27, 0.05);
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--surface-3);
+    }
+    .meta-row:last-child { border-bottom: 0; }
+    .meta-row span:first-child { color: var(--muted); }
+    .meta-row span:last-child { font-family: var(--font-mono); text-align: right; }
+
+    .toc {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 12px 0;
+      background: color-mix(in srgb, var(--bg) 94%, transparent);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+    .toc a {
+      flex: 0 0 auto;
+      min-height: 36px;
+      padding: 8px 11px;
+      color: var(--muted);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      font-size: var(--type-label-size);
+      font-weight: 500;
+      line-height: 18px;
+      text-decoration: none;
+    }
+    .toc a:hover, .toc a:focus-visible {
+      color: var(--fg);
+      background: var(--surface);
+      border-color: var(--border);
+      outline: none;
+    }
+
+    section { padding-top: 56px; }
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 520px);
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+    .section-no {
+      display: inline-block;
+      margin-bottom: 6px;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: var(--type-micro-size);
+      font-weight: 600;
+      line-height: var(--type-micro-line);
+      letter-spacing: 0.04em;
+    }
+    h2 {
+      margin-bottom: 0;
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 32px;
+      letter-spacing: 0;
+    }
+    .section-head p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 21px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: start;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-head h3 {
+      margin-bottom: 3px;
+      font-family: var(--font-display);
+      font-size: var(--type-section-size);
+      font-weight: 600;
+      line-height: var(--type-section-line);
+    }
+    .card-head p { margin-bottom: 0; color: var(--muted); font-size: var(--type-label-size); line-height: var(--type-label-line); }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      color: var(--muted);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 16px;
+      white-space: nowrap;
+    }
+
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .problem {
+      padding: 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .problem strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--fg);
+      font-size: var(--type-group-size);
+      font-weight: 600;
+      line-height: var(--type-group-line);
+    }
+    .problem p { margin-bottom: 0; color: var(--muted); font-size: var(--type-body-size); line-height: var(--type-body-line); }
+    .problem .before, .problem .after { font-family: var(--font-mono); }
+    .problem .after { color: var(--accent); font-weight: 600; }
+
+    .theme-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .theme-panel {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .theme-panel.light {
+      --panel-bg: #fafafa;
+      --panel-surface: #ffffff;
+      --panel-fg: #18181b;
+      --panel-muted: #5f5f66;
+      --panel-border: #d9d9de;
+      --panel-accent: #0b5cb0;
+      --panel-ok: #0f7b3d;
+      --panel-warn: #9a5b00;
+      --panel-error: #c2261c;
+      --glyph-cutout: #fafafa;
+    }
+    .theme-panel.dark {
+      --panel-bg: #111113;
+      --panel-surface: #18181b;
+      --panel-fg: #f4f4f5;
+      --panel-muted: #8e8e97;
+      --panel-border: #35353c;
+      --panel-accent: #4da3ff;
+      --panel-ok: #4ade80;
+      --panel-warn: #fbbf24;
+      --panel-error: #ff6b61;
+      --glyph-cutout: #111113;
+    }
+    .theme-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 16px;
+      color: var(--panel-fg);
+      background: var(--panel-surface);
+      border-bottom: 1px solid var(--panel-border);
+      font-size: var(--type-group-size);
+      font-weight: 600;
+      line-height: var(--type-group-line);
+    }
+    .theme-label code { color: var(--panel-muted); font-size: 11px; }
+    .specimen {
+      min-height: 470px;
+      padding: 18px;
+      color: var(--panel-fg);
+      background: var(--panel-bg);
+    }
+    .specimen-row {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr) 112px;
+      gap: 14px;
+      align-items: baseline;
+      min-height: 54px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--panel-border);
+    }
+    .specimen-row:last-child { border-bottom: 0; }
+    .token-name {
+      color: var(--panel-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 16px;
+    }
+    .token-use { color: var(--panel-muted); font-size: 11px; line-height: 16px; text-align: right; }
+    .sample-display { font-family: var(--font-display); font-size: 18px; font-weight: 600; line-height: 24px; letter-spacing: 0; }
+    .sample-section { font-family: var(--font-display); font-size: 16px; font-weight: 600; line-height: 22px; letter-spacing: 0; }
+    .sample-group { font-family: var(--font-ui); font-size: 14px; font-weight: 600; line-height: 20px; letter-spacing: 0; }
+    .sample-body { font-family: var(--font-ui); font-size: 13px; font-weight: 400; line-height: 20px; letter-spacing: 0; }
+    .sample-label { font-family: var(--font-ui); font-size: 12px; font-weight: 500; line-height: 18px; letter-spacing: 0; }
+    .sample-micro { color: var(--panel-muted); font-family: var(--font-ui); font-size: 11px; font-weight: 500; line-height: 16px; letter-spacing: 0.02em; }
+    .sample-mono { font-family: var(--font-mono); font-size: 13px; font-weight: 450; line-height: 20px; letter-spacing: 0; font-variant-numeric: tabular-nums slashed-zero; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; min-width: 960px; }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+      font-size: 12px;
+      line-height: 18px;
+    }
+    th { background: var(--surface-2); color: var(--muted); font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    td code { color: var(--accent); font-size: 11px; }
+    .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .muted { color: var(--muted); }
+
+    .collision {
+      display: grid;
+      grid-template-columns: 1fr 52px 1fr;
+      gap: 16px;
+      align-items: center;
+      padding: 22px;
+    }
+    .collision-stack { display: grid; gap: 8px; }
+    .collision-item {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .collision-item.bad { background: var(--surface-2); border-style: dashed; }
+    .collision-item strong { display: block; margin-bottom: 2px; }
+    .collision-item span { color: var(--muted); font-family: var(--font-mono); font-size: 11px; line-height: 16px; }
+    .arrow-mark {
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 22px;
+      font-weight: 600;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .row-proof {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 18px;
+    }
+    .control-row {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr) 86px;
+      gap: 12px;
+      align-items: center;
+      min-height: 40px;
+      padding: 4px 0;
+    }
+    .control-row + .control-row { border-top: 1px solid var(--border); }
+    .control-label { font-size: 12px; font-weight: 500; line-height: 18px; }
+    .text-control, .value-readout {
+      display: flex;
+      align-items: center;
+      height: 32px;
+      padding: 0 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--surface);
+      font-size: 13px;
+      line-height: 20px;
+    }
+    .value-readout { justify-content: flex-end; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .range-track { position: relative; height: 6px; background: var(--surface-3); border-radius: 999px; }
+    .range-track::before { content: ""; position: absolute; inset: 0 42% 0 0; background: var(--accent); border-radius: inherit; }
+    .range-track::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 58%;
+      width: 16px;
+      height: 16px;
+      border: 1px solid var(--border-strong);
+      border-radius: 50%;
+      background: var(--surface);
+      transform: translate(-50%, -50%);
+    }
+    .row-caption { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 16px; }
+
+    .icon-foundations {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr);
+      gap: 16px;
+    }
+    .keyline-card, .rule-card {
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .keyline-svg { display: block; width: 100%; max-width: 280px; margin: 8px auto 4px; }
+    .rule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .rule {
+      padding: 13px 14px;
+      background: var(--surface-2);
+      border-radius: 6px;
+    }
+    .rule strong { display: block; margin-bottom: 3px; font-size: 12px; font-weight: 600; line-height: 18px; }
+    .rule span { color: var(--muted); font-size: 11px; line-height: 16px; }
+
+    .glyph-table { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .glyph-grid {
+      display: grid;
+      grid-template-columns: 170px 180px 180px minmax(230px, 1fr);
+      min-width: 820px;
+    }
+    .glyph-grid > div { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    .glyph-grid > div:nth-last-child(-n + 4) { border-bottom: 0; }
+    .glyph-head { color: var(--muted); background: var(--surface-2); font-size: 11px; font-weight: 600; line-height: 16px; }
+    .glyph-name { font-family: var(--font-mono); font-size: 11px; line-height: 18px; }
+    .icon-cell { display: flex; align-items: center; gap: 10px; }
+    .icon-cell.light { color: var(--fg); }
+    .icon-cell.dark { color: var(--dark-fg); background: var(--dark-bg); }
+    .glyph { display: block; flex: 0 0 auto; }
+    .glyph-24 { width: 24px; height: 24px; }
+    .glyph-18 { width: 18px; height: 18px; }
+    .glyph-14 { width: 14px; height: 14px; }
+    .c-muted { color: #5f5f66; }
+    .theme-dark { --glyph-cutout: #111113; }
+    .theme-dark .c-muted { color: #8e8e97; }
+    .c-text { color: #18181b; }
+    .theme-dark .c-text { color: #f4f4f5; }
+    .c-accent { color: #0b5cb0; }
+    .theme-dark .c-accent { color: #4da3ff; }
+    .c-ok { color: #0f7b3d; }
+    .theme-dark .c-ok { color: #4ade80; }
+    .c-warn { color: #9a5b00; }
+    .theme-dark .c-warn { color: #fbbf24; }
+    .c-error { color: #c2261c; }
+    .theme-dark .c-error { color: #ff6b61; }
+
+    .size-proof {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+      gap: 10px;
+      padding: 18px;
+    }
+    .size-proof-item {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 92px;
+      padding: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .size-proof-item .sizes { display: flex; align-items: flex-end; gap: 10px; }
+    .size-proof-item b { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+
+    .correction-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .correction {
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 14px;
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .correction-icon { display: grid; place-items: center; width: 44px; height: 44px; background: var(--surface-2); border-radius: 6px; }
+    .correction strong { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; line-height: 18px; }
+    .correction p { margin-bottom: 0; color: var(--muted); font-size: 11px; line-height: 17px; }
+
+    .implementation {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .implementation .card { padding: 18px; box-shadow: none; }
+    .implementation h3 { margin-bottom: 8px; font-size: 14px; font-weight: 600; line-height: 20px; }
+    .implementation ul { margin: 0; padding-left: 18px; color: var(--muted); }
+    .implementation li + li { margin-top: 6px; }
+    .implementation li { font-size: 12px; line-height: 18px; }
+
+    .status-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 4px 9px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 11px;
+      line-height: 16px;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .ok-text { color: var(--ok); }
+    .warn-text { color: var(--warn); }
+    .error-text { color: var(--error); }
+
+    footer {
+      margin-top: 64px;
+      padding-top: 20px;
+      color: var(--muted);
+      border-top: 1px solid var(--border-strong);
+      font-size: 11px;
+      line-height: 18px;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 1080px) {
+      .masthead, .section-head { grid-template-columns: 1fr; }
+      .meta-block { min-width: 0; }
+      .problem-grid, .implementation { grid-template-columns: 1fr; }
+      .icon-foundations { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 860px) {
+      .shell { width: min(100% - 24px, 1540px); padding-top: 10px; }
+      .theme-grid, .row-proof, .correction-grid { grid-template-columns: 1fr; }
+      .specimen-row { grid-template-columns: 88px minmax(0, 1fr); }
+      .token-use { display: none; }
+      .collision { grid-template-columns: 1fr; }
+      .arrow-mark { transform: rotate(90deg); }
+      .rule-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 520px) {
+      .toc { margin-inline: -12px; padding-inline: 12px; }
+      .theme-label { align-items: flex-start; flex-direction: column; gap: 4px; }
+      .specimen-row { grid-template-columns: 1fr; gap: 6px; }
+      .control-row { grid-template-columns: 1fr 78px; }
+      .control-row .range-track { grid-column: 1 / -1; grid-row: 2; }
+      .status-pill { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="visually-hidden" aria-hidden="true">
+    <defs>
+      <symbol id="glyph-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 9l6 6 6-6"/>
+      </symbol>
+      <symbol id="glyph-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6l6 6-6 6"/>
+      </symbol>
+      <symbol id="glyph-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 15l6-6 6 6"/>
+      </symbol>
+      <symbol id="glyph-question" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M9.4 9.1a2.8 2.8 0 0 1 5.3 1.3c0 2.1-2.7 2.4-2.7 4.2"/>
+        <path d="M12 17.8h.01"/>
+      </symbol>
+      <symbol id="glyph-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </symbol>
+      <symbol id="glyph-dot-run" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4.75" fill="currentColor"/>
+        <circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-opacity=".38"/>
+      </symbol>
+      <symbol id="glyph-dot-stop" viewBox="0 0 24 24">
+        <rect x="7.5" y="7.5" width="9" height="9" rx="1.5" fill="currentColor"/>
+        <rect x="4.25" y="4.25" width="15.5" height="15.5" rx="3" fill="none" stroke="currentColor" stroke-width="2.5" stroke-opacity=".38"/>
+      </symbol>
+      <symbol id="glyph-dot-error" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" fill="currentColor"/>
+        <path d="M12 6.8v6.4M12 17.2h.01" fill="none" stroke="var(--glyph-cutout)" stroke-width="2.5" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="glyph-dot-dirty" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.75" fill="none" stroke="currentColor" stroke-width="2.5"/>
+        <path d="M12 5.9l6.1 12.2" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="glyph-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M14 7l5 5-5 5"/>
+      </symbol>
+      <symbol id="glyph-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4.5 7h15M9 7V4.5h6V7M6.5 7l.8 12.5h9.4L17.5 7M10 10.5v6M14 10.5v6"/>
+      </symbol>
+      <symbol id="glyph-play" viewBox="0 0 24 24">
+        <path d="M8 5.5l10 6.5-10 6.5z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      </symbol>
+      <symbol id="glyph-stop" viewBox="0 0 24 24">
+        <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor"/>
+      </symbol>
+      <symbol id="glyph-restart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5.3 9.4A7.5 7.5 0 0 1 19 11.6M18.7 14.6A7.5 7.5 0 0 1 5 12.4"/>
+        <path d="M3.8 5.8l1.5 3.6 3.6-1.5M20.2 18.2l-1.5-3.6-3.6 1.5"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <main class="shell">
+    <header class="masthead" data-od-id="spec-header">
+      <div>
+        <p class="eyebrow">llama_ctl / Design implementation sheet</p>
+        <h1>llama.cpp Service Console<br>统一字体与图标规范</h1>
+        <p class="lede">面向 Windows 桌面端的实施级规范：解决当前字号角色重叠、数值行错位与图标小尺寸模糊问题，并为 14 个现有操作图标建立可一致交付的 24 单位几何系统。</p>
+      </div>
+      <aside class="meta-block" aria-label="规范摘要">
+        <div class="meta-row"><span>目标平台</span><span>Windows 10 / 11</span></div>
+        <div class="meta-row"><span>界面框架</span><span>CustomTkinter</span></div>
+        <div class="meta-row"><span>图标网格</span><span>24 × 24 unit</span></div>
+        <div class="meta-row"><span>版本</span><span>v1.0 · 2026-10-10</span></div>
+      </aside>
+    </header>
+
+    <nav class="toc" aria-label="页面目录">
+      <a href="#diagnosis">缺陷定位</a>
+      <a href="#scale">字体令牌</a>
+      <a href="#specimen">双主题字样</a>
+      <a href="#rows">行高对齐</a>
+      <a href="#icon-rules">图标规则</a>
+      <a href="#glyphs">14 个图标</a>
+      <a href="#small-sizes">小尺寸检查</a>
+      <a href="#handoff">交付约束</a>
+    </nav>
+
+    <section id="diagnosis" data-od-id="diagnosis-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">01 / DIAGNOSIS</span>
+          <h2>先消除三个结构性问题</h2>
+        </div>
+        <p>不建议只把字号统一放大。角色层级、行盒和输入控件高度必须一起改，才能让长参数面板看起来稳定。</p>
+      </div>
+      <div class="problem-grid">
+        <article class="problem" data-od-id="problem-role-collision">
+          <strong>三个角色共用一个“12 bold”</strong>
+          <p><span class="before">现状：卡片标题 / 折叠组标题 / 日志开关 = 12 bold</span><br><span class="after">新规则：16 / 600 · 14 / 600 · 12 / 500</span></p>
+        </article>
+        <article class="problem" data-od-id="problem-row-mismatch">
+          <strong>数值读数与文本输入的行盒不同</strong>
+          <p><span class="before">现状：19px 行高紧贴 23px 行高，产生 4px 视觉错位</span><br><span class="after">新规则：两者统一为 13px / 20px，控件盒高 32px</span></p>
+        </article>
+        <article class="problem" data-od-id="problem-scale-gap">
+          <strong>12 到 18 之间缺少有序层级</strong>
+          <p><span class="before">现状：只有 12 / 13 / 18 三个离散值</span><br><span class="after">新规则：18 / 16 / 14 / 13 / 12 / 11 六层语义阶梯</span></p>
+        </article>
+      </div>
+    </section>
+
+    <section id="scale" data-od-id="type-scale-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">02 / TYPE SCALE</span>
+          <h2>六个语义层级，加一个技术层级</h2>
+        </div>
+        <p>前六个令牌负责界面层级；<code>type-mono</code> 只负责数值、路径、日志等需要等宽和表格数字的场景，不参与标题竞争。</p>
+      </div>
+      <div class="table-wrap">
+        <table aria-label="字体令牌表">
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>角色</th>
+              <th>字体家族与主字体</th>
+              <th>字号 / 字重 / 行高</th>
+              <th>字距</th>
+              <th>具体 UI 元素</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>type-display</code></td>
+              <td>Display</td>
+              <td>Microsoft YaHei UI → Segoe UI Variable Text → Segoe UI</td>
+              <td class="num">18 / 600 / 24 px</td>
+              <td class="num">0</td>
+              <td>窗口标题；“llama.cpp Service Console”；设置对话框标题</td>
+            </tr>
+            <tr>
+              <td><code>type-section</code></td>
+              <td>Section</td>
+              <td>Microsoft YaHei UI → Segoe UI Variable Text → Segoe UI</td>
+              <td class="num">16 / 600 / 22 px</td>
+              <td class="num">0</td>
+              <td>状态、参数预设、启动参数、日志四个卡片标题</td>
+            </tr>
+            <tr>
+              <td><code>type-group</code></td>
+              <td>Group</td>
+              <td>Microsoft YaHei UI → Segoe UI Variable Text</td>
+              <td class="num">14 / 600 / 20 px</td>
+              <td class="num">0</td>
+              <td>7 个折叠参数组标题；二级设置区标题</td>
+            </tr>
+            <tr>
+              <td><code>type-body</code></td>
+              <td>Body</td>
+              <td>Microsoft YaHei UI → Segoe UI Variable Text</td>
+              <td class="num">13 / 400 / 20 px</td>
+              <td class="num">0</td>
+              <td>说明文字、下拉选项、输入框正文、参数帮助说明</td>
+            </tr>
+            <tr>
+              <td><code>type-label</code></td>
+              <td>Label</td>
+              <td>Microsoft YaHei UI → Segoe UI Variable Text</td>
+              <td class="num">12 / 500 / 18 px</td>
+              <td class="num">0</td>
+              <td>参数行标签、按钮文字、自动启动标签、日志开关</td>
+            </tr>
+            <tr>
+              <td><code>type-micro</code></td>
+              <td>Micro</td>
+              <td>Microsoft YaHei UI → Segoe UI Variable Text</td>
+              <td class="num">11 / 500 / 16 px</td>
+              <td class="num">0.02em</td>
+              <td>状态附属信息、端口、路径提示、健康探针时间戳</td>
+            </tr>
+            <tr>
+              <td><code>type-mono</code></td>
+              <td>Mono / numeric</td>
+              <td>Cascadia Mono → Cascadia Code → Consolas</td>
+              <td class="num">13 / 450 / 20 px</td>
+              <td class="num">0</td>
+              <td>滑块数值、上下文长度、端口、路径、server.err 日志尾</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="status-strip" aria-label="字体回退要求">
+        <span class="status-pill"><span class="status-dot" style="color: var(--accent)"></span>主字体优先：Microsoft YaHei UI</span>
+        <span class="status-pill"><span class="status-dot" style="color: var(--ok)"></span>等宽主字体：Cascadia Mono</span>
+        <span class="status-pill"><span class="status-dot" style="color: var(--warn)"></span>不得回退到单一 system-ui</span>
+      </div>
+    </section>
+
+    <section id="specimen" data-od-id="type-specimen-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">03 / SPECIMEN</span>
+          <h2>同一份内容，在双主题下逐层验证</h2>
+        </div>
+        <p>中文负责主要信息，英文与数字验证混排比例。每一层都使用实际角色文本，而不是只展示字母表。</p>
+      </div>
+      <div class="theme-grid">
+        <article class="theme-panel light" data-od-id="specimen-light">
+          <div class="theme-label"><span>浅色主题 · Light</span><code>#fafafa / #18181b</code></div>
+          <div class="specimen">
+            <div class="specimen-row"><span class="token-name">display</span><span class="sample-display">服务 RUNNING · llama.cpp</span><span class="token-use">窗口标题</span></div>
+            <div class="specimen-row"><span class="token-name">section</span><span class="sample-section">状态与运行控制</span><span class="token-use">卡片标题</span></div>
+            <div class="specimen-row"><span class="token-name">group</span><span class="sample-group">推理性能与上下文</span><span class="token-use">折叠组标题</span></div>
+            <div class="specimen-row"><span class="token-name">body</span><span class="sample-body">本地模型已加载，最大上下文为 8192 tokens。</span><span class="token-use">正文说明</span></div>
+            <div class="specimen-row"><span class="token-name">label</span><span class="sample-label">自动启动</span><span class="token-use">控件标签</span></div>
+            <div class="specimen-row"><span class="token-name">micro</span><span class="sample-micro">健康探针 · 127.0.0.1:8080 · 刚刚</span><span class="token-use">附属信息</span></div>
+            <div class="specimen-row"><span class="token-name">mono</span><span class="sample-mono">ctx=8192  temp=0.80  port=8080</span><span class="token-use">数值与日志</span></div>
+          </div>
+        </article>
+        <article class="theme-panel dark" data-od-id="specimen-dark">
+          <div class="theme-label"><span>深色主题 · Dark</span><code>#111113 / #f4f4f5</code></div>
+          <div class="specimen">
+            <div class="specimen-row"><span class="token-name">display</span><span class="sample-display">服务 RUNNING · llama.cpp</span><span class="token-use">窗口标题</span></div>
+            <div class="specimen-row"><span class="token-name">section</span><span class="sample-section">状态与运行控制</span><span class="token-use">卡片标题</span></div>
+            <div class="specimen-row"><span class="token-name">group</span><span class="sample-group">推理性能与上下文</span><span class="token-use">折叠组标题</span></div>
+            <div class="specimen-row"><span class="token-name">body</span><span class="sample-body">本地模型已加载，最大上下文为 8192 tokens。</span><span class="token-use">正文说明</span></div>
+            <div class="specimen-row"><span class="token-name">label</span><span class="sample-label">自动启动</span><span class="token-use">控件标签</span></div>
+            <div class="specimen-row"><span class="token-name">micro</span><span class="sample-micro">健康探针 · 127.0.0.1:8080 · 刚刚</span><span class="token-use">附属信息</span></div>
+            <div class="specimen-row"><span class="token-name">mono</span><span class="sample-mono">ctx=8192  temp=0.80  port=8080</span><span class="token-use">数值与日志</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section data-od-id="collision-resolution-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">04 / ROLE SPLIT</span>
+          <h2>把碰撞的角色明确拆开</h2>
+        </div>
+        <p>开发者不应再用一个“卡片标题”样式覆盖多个层级。下面是必须写入主题配置的角色映射。</p>
+      </div>
+      <div class="card">
+        <div class="collision">
+          <div class="collision-stack">
+            <div class="collision-item bad"><strong>卡片标题</strong><span>12 / 600 / 18</span></div>
+            <div class="collision-item bad"><strong>折叠组标题</strong><span>12 / 600 / 18</span></div>
+            <div class="collision-item bad"><strong>日志开关</strong><span>12 / 600 / 18</span></div>
+          </div>
+          <div class="arrow-mark" aria-hidden="true">→</div>
+          <div class="collision-stack">
+            <div class="collision-item"><strong>Section · 卡片标题</strong><span>16 / 600 / 22 · type-section</span></div>
+            <div class="collision-item"><strong>Group · 折叠组标题</strong><span>14 / 600 / 20 · type-group</span></div>
+            <div class="collision-item"><strong>Label · 日志开关</strong><span>12 / 500 / 18 · type-label</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="rows" data-od-id="row-alignment-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">05 / ROW ALIGNMENT</span>
+          <h2>数值行与文本输入行共用同一条基线</h2>
+        </div>
+        <p>目标值固定为：<code>font-size: 13px; line-height: 20px; control-height: 32px</code>。所有行使用垂直居中容器，不再依赖不同字体自身的默认基线。</p>
+      </div>
+      <div class="card">
+        <div class="row-proof">
+          <div aria-label="滑块参数行示例">
+            <div class="control-row">
+              <span class="control-label">上下文长度</span>
+              <span class="range-track" aria-hidden="true"></span>
+              <span class="value-readout">8192</span>
+            </div>
+            <p class="row-caption">滑块行：标签 12/18，轨道与数值读数 13/20，数值右对齐。</p>
+          </div>
+          <div aria-label="文本输入参数行示例">
+            <div class="control-row">
+              <span class="control-label">监听地址</span>
+              <span class="text-control">127.0.0.1</span>
+              <span class="value-readout">:8080</span>
+            </div>
+            <p class="row-caption">文本输入行：输入正文与端口读数同为 13/20；控件盒高 32px。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="icon-rules" data-od-id="icon-rules-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">06 / ICON SYSTEM</span>
+          <h2>24 单位网格上的统一几何</h2>
+        </div>
+        <p>所有图标共享同一画布、描边和视觉修正规则，导出为 72 × 144 PNG 时左帧使用浅色主题颜色，右帧使用深色主题颜色。</p>
+      </div>
+      <div class="icon-foundations">
+        <article class="keyline-card" data-od-id="keyline-diagram">
+          <div class="card-head" style="padding:0 0 12px; border-bottom:0">
+            <div>
+              <h3>Keyline 与安全区</h3>
+              <p>正方形、圆形和纵向矩形的光学尺寸</p>
+            </div>
+          </div>
+          <svg class="keyline-svg" viewBox="0 0 240 240" role="img" aria-label="24 单位图标网格关键线示意图">
+            <rect x="20" y="20" width="200" height="200" fill="none" stroke="#d9d9de" stroke-width="2"/>
+            <path d="M20 70h200M20 120h200M20 170h200M70 20v200M120 20v200M170 20v200" stroke="#e8e8ec" stroke-width="1"/>
+            <rect x="45" y="45" width="150" height="150" rx="8" fill="none" stroke="#0b5cb0" stroke-width="2" stroke-dasharray="6 5"/>
+            <circle cx="120" cy="120" r="83" fill="none" stroke="#0f7b3d" stroke-width="2" stroke-dasharray="6 5"/>
+            <rect x="53" y="37" width="134" height="166" rx="8" fill="none" stroke="#9a5b00" stroke-width="2" stroke-dasharray="6 5"/>
+            <path d="M120 37v166M53 120h134" stroke="#5f5f66" stroke-width="1.5" stroke-dasharray="3 5"/>
+            <text x="28" y="35" fill="#5f5f66" font-family="Cascadia Mono, Consolas, monospace" font-size="12">24 unit canvas · 2 unit safe padding</text>
+          </svg>
+          <div class="rule-grid">
+            <div class="rule"><strong>正方形</strong><span>18 × 18，位于 3,3；圆角 1.5。</span></div>
+            <div class="rule"><strong>圆形</strong><span>直径 20；相对正方形外扩 1 单位补偿曲率。</span></div>
+            <div class="rule"><strong>纵向矩形</strong><span>16 × 20，位于 4,2；代表机架、堆叠与路径。</span></div>
+            <div class="rule"><strong>最小内边距</strong><span>2 单位；圆形允许 2 单位，正方形保持 3 单位。</span></div>
+          </div>
+        </article>
+        <article class="rule-card" data-od-id="icon-rule-card">
+          <div class="card-head" style="padding:0 0 14px; border-bottom:0">
+            <div>
+              <h3>描边、端点和光学修正</h3>
+              <p>适用于全部 14 个图标，不按图标单独调整</p>
+            </div>
+          </div>
+          <div class="rule-grid">
+            <div class="rule"><strong>描边宽度</strong><span>2.5 单位；14px 导出时保持 SVG 缩放，不重新描线。</span></div>
+            <div class="rule"><strong>端点与连接</strong><span><code>stroke-linecap: round</code>；<code>stroke-linejoin: round</code>。</span></div>
+            <div class="rule"><strong>外角半径</strong><span>填充形状外角 1.5 单位；内角保持 1–1.5 单位。</span></div>
+            <div class="rule"><strong>对齐</strong><span>优先对齐 0.5 单位半像素网格，避免不同 DPI 下发虚。</span></div>
+            <div class="rule"><strong>圆形光学内缩</strong><span>填充圆较正方形外扩 1 单位；描边圆保持 2 单位安全区。</span></div>
+            <div class="rule"><strong>状态一致性</strong><span>颜色只表达状态，不改变轮廓尺寸；同一状态在所有图标中复用颜色。</span></div>
+            <div class="rule"><strong>禁止项</strong><span>不使用多色渐变、阴影、投影、发光或独立图标专属色。</span></div>
+            <div class="rule"><strong>导出帧序</strong><span>左帧浅色，右帧深色；两帧几何完全相同，仅替换颜色。</span></div>
+          </div>
+          <div class="table-wrap" style="margin-top:14px">
+            <table aria-label="图标色彩映射">
+              <thead>
+                <tr><th>角色</th><th>浅色主题</th><th>深色主题</th><th>使用图标</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Muted</td><td><code>#5f5f66</code></td><td><code>#8e8e97</code></td><td>辅助、未激活、次要控件</td></tr>
+                <tr><td>Text</td><td><code>#18181b</code></td><td><code>#f4f4f5</code></td><td>chevron-* · question · close · arrow-right · trash · stop · restart</td></tr>
+                <tr><td>Accent</td><td><code>#0b5cb0</code></td><td><code>#4da3ff</code></td><td>play</td></tr>
+                <tr><td>OK</td><td><code>#0f7b3d</code></td><td><code>#4ade80</code></td><td>dot-run</td></tr>
+                <tr><td>Warn</td><td><code>#9a5b00</code></td><td><code>#fbbf24</code></td><td>dot-stop · dot-dirty</td></tr>
+                <tr><td>Error</td><td><code>#c2261c</code></td><td><code>#ff6b61</code></td><td>dot-error</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="glyphs" data-od-id="glyph-catalog-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">07 / GLYPH CATALOG</span>
+          <h2>14 个现有图标，双主题逐个对齐</h2>
+        </div>
+        <p>左侧为浅色主题颜色，右侧为深色主题颜色，均为 24px 实际尺寸。路径保持 24 单位坐标，便于一次生成左右两帧 PNG。</p>
+      </div>
+      <div class="glyph-table">
+        <div class="glyph-grid">
+          <div class="glyph-head">图标名</div>
+          <div class="glyph-head">浅色 · 24px</div>
+          <div class="glyph-head">深色 · 24px</div>
+          <div class="glyph-head">语义与状态</div>
+
+          <div class="glyph-name">chevron-down</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-down"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-down"/></svg></div>
+          <div>展开折叠组；默认 <code>Text</code>，可随主题切换。</div>
+
+          <div class="glyph-name">chevron-right</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-right"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-right"/></svg></div>
+          <div>折叠状态；与 chevron-down 使用同一中心点。</div>
+
+          <div class="glyph-name">chevron-up</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-up"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-up"/></svg></div>
+          <div>返回、收起或滚动到顶部；不改变 stroke。</div>
+
+          <div class="glyph-name">question</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-question"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-question"/></svg></div>
+          <div>参数帮助按钮；外圆使用 20 单位圆形关键线。</div>
+
+          <div class="glyph-name">close</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-close"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-close"/></svg></div>
+          <div>关闭对话框或清除轻量内容；不用于危险操作。</div>
+
+          <div class="glyph-name">dot-run</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-ok" aria-hidden="true"><use href="#glyph-dot-run"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-ok" aria-hidden="true"><use href="#glyph-dot-run"/></svg></div>
+          <div>服务运行中；实心点加外圈脉冲，保留 2 单位内边距。</div>
+
+          <div class="glyph-name">dot-stop</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-warn" aria-hidden="true"><use href="#glyph-dot-stop"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-warn" aria-hidden="true"><use href="#glyph-dot-stop"/></svg></div>
+          <div>服务已停止；方形实心块比圆点更适合表达“停”。</div>
+
+          <div class="glyph-name">dot-error</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-error" aria-hidden="true"><use href="#glyph-dot-error"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-error" aria-hidden="true"><use href="#glyph-dot-error"/></svg></div>
+          <div>探针失败或服务异常；内部负形使用主题背景色。</div>
+
+          <div class="glyph-name">dot-dirty</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-warn" aria-hidden="true"><use href="#glyph-dot-dirty"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-warn" aria-hidden="true"><use href="#glyph-dot-dirty"/></svg></div>
+          <div>参数已修改但未应用；圆环加斜线，避免半填充丢失。</div>
+
+          <div class="glyph-name">arrow-right</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-arrow-right"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-arrow-right"/></svg></div>
+          <div>跳转、应用或进入详情；不使用填充箭头。</div>
+
+          <div class="glyph-name">trash</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-trash"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-trash"/></svg></div>
+          <div>删除预设；按下状态应同时提供文字确认，不单独依赖图标。</div>
+
+          <div class="glyph-name">play</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-accent" aria-hidden="true"><use href="#glyph-play"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-accent" aria-hidden="true"><use href="#glyph-play"/></svg></div>
+          <div>启动服务；唯一使用 accent 的操作图标。</div>
+
+          <div class="glyph-name">stop</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-stop"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-stop"/></svg></div>
+          <div>停止服务；填充方块与圆形 play 形成明确动作区分。</div>
+
+          <div class="glyph-name">restart</div>
+          <div class="icon-cell light"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-restart"/></svg></div>
+          <div class="icon-cell dark theme-dark"><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-restart"/></svg></div>
+          <div>重启服务；两条弧线保持 2.5 单位描边与圆角箭头。</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="small-sizes" data-od-id="small-size-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">08 / SMALL-SIZE LEGIBILITY</span>
+          <h2>14 / 18 / 24px 同时检查，不靠放大补救</h2>
+        </div>
+        <p>同一路径在三种尺寸比较。实际 GUI 以 14px 为主，18px 用于中等按钮，24px 用于标题栏和主操作。</p>
+      </div>
+      <div class="card">
+        <div class="size-proof">
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-chevron-down"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-chevron-down"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-down"/></svg></span><b>chevron</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-chevron-right"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-chevron-right"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-right"/></svg></span><b>chevron-right</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-chevron-up"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-chevron-up"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-chevron-up"/></svg></span><b>chevron-up</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-question"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-question"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-question"/></svg></span><b>question</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-close"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-close"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-close"/></svg></span><b>close</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-ok" aria-hidden="true"><use href="#glyph-dot-run"/></svg><svg class="glyph glyph-18 c-ok" aria-hidden="true"><use href="#glyph-dot-run"/></svg><svg class="glyph glyph-24 c-ok" aria-hidden="true"><use href="#glyph-dot-run"/></svg></span><b>dot-run</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-warn" aria-hidden="true"><use href="#glyph-dot-stop"/></svg><svg class="glyph glyph-18 c-warn" aria-hidden="true"><use href="#glyph-dot-stop"/></svg><svg class="glyph glyph-24 c-warn" aria-hidden="true"><use href="#glyph-dot-stop"/></svg></span><b>dot-stop</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-error" aria-hidden="true"><use href="#glyph-dot-error"/></svg><svg class="glyph glyph-18 c-error" aria-hidden="true"><use href="#glyph-dot-error"/></svg><svg class="glyph glyph-24 c-error" aria-hidden="true"><use href="#glyph-dot-error"/></svg></span><b>dot-error · 修正</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-warn" aria-hidden="true"><use href="#glyph-dot-dirty"/></svg><svg class="glyph glyph-18 c-warn" aria-hidden="true"><use href="#glyph-dot-dirty"/></svg><svg class="glyph glyph-24 c-warn" aria-hidden="true"><use href="#glyph-dot-dirty"/></svg></span><b>dot-dirty · 修正</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-arrow-right"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-arrow-right"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-arrow-right"/></svg></span><b>arrow-right</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-trash"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-trash"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-trash"/></svg></span><b>trash</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-accent" aria-hidden="true"><use href="#glyph-play"/></svg><svg class="glyph glyph-18 c-accent" aria-hidden="true"><use href="#glyph-play"/></svg><svg class="glyph glyph-24 c-accent" aria-hidden="true"><use href="#glyph-play"/></svg></span><b>play</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-stop"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-stop"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-stop"/></svg></span><b>stop</b></div>
+          <div class="size-proof-item"><span class="sizes"><svg class="glyph glyph-14 c-text" aria-hidden="true"><use href="#glyph-restart"/></svg><svg class="glyph glyph-18 c-text" aria-hidden="true"><use href="#glyph-restart"/></svg><svg class="glyph glyph-24 c-text" aria-hidden="true"><use href="#glyph-restart"/></svg></span><b>restart</b></div>
+        </div>
+      </div>
+      <div class="correction-grid" style="margin-top:12px">
+        <article class="correction" data-od-id="correction-dot-error">
+          <div class="correction-icon"><svg class="glyph glyph-24 c-error" aria-hidden="true"><use href="#glyph-dot-error"/></svg></div>
+          <div><strong>dot-error · 14px 需使用修正几何</strong><p>圆：<span class="mono">cx=12 cy=12 r=9</span>；负形竖线：<span class="mono">x=12 y=6.8→13.2</span>，<span class="mono">stroke=2.5</span>；负形点：<span class="mono">cx=12 cy=17.2 r=1.25</span>。原来的细感叹号缩小后会糊成实心红点，因此保留实心错误圆和足够负空间，不再叠加细轮廓。</p></div>
+        </article>
+        <article class="correction" data-od-id="correction-dot-dirty">
+          <div class="correction-icon"><svg class="glyph glyph-24 c-warn" aria-hidden="true"><use href="#glyph-dot-dirty"/></svg></div>
+          <div><strong>dot-dirty · 14px 需使用修正几何</strong><p>圆环：<span class="mono">cx=12 cy=12 r=8.75 stroke=2.5</span>；斜线：<span class="mono">M12 5.9 L18.1 18.1 stroke=2.5</span>，两端 round。半填充圆在 14px 下无法辨认“已修改”，因此改为完整圆环加单斜线，轮廓不随主题和尺寸改变。</p></div>
+        </article>
+      </div>
+      <div class="status-strip">
+        <span class="status-pill"><span class="status-dot" style="color: var(--ok)"></span>14px 可辨认：chevron · close · dot-run · play · stop</span>
+        <span class="status-pill"><span class="status-dot" style="color: var(--warn)"></span>14px 使用修正几何：dot-error · dot-dirty</span>
+        <span class="status-pill"><span class="status-dot" style="color: var(--accent)"></span>路径不缩放为独立网格，统一从 24 单位导出</span>
+      </div>
+    </section>
+
+    <section id="handoff" data-od-id="implementation-handoff-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">09 / IMPLEMENTATION</span>
+          <h2>可直接进入主题与资源管线</h2>
+        </div>
+        <p>CustomTkinter 侧只需绑定 token；PNG 生成侧只需复用同一 SVG 路径并替换左右帧颜色。</p>
+      </div>
+      <div class="implementation">
+        <article class="card" data-od-id="handoff-css">
+          <h3>字体与行盒</h3>
+          <ul>
+            <li>在主题初始化处声明 7 个字体 token，禁止在控件内硬编码字号。</li>
+            <li>参数行统一设控件高度 32px、内部 line-height 20px。</li>
+            <li>中文标题不使用负字距；仅英文大写微标签使用 0.02em。</li>
+          </ul>
+        </article>
+        <article class="card" data-od-id="handoff-icons">
+          <h3>SVG 与 PNG</h3>
+          <ul>
+            <li>每个图标维护一份 24 × 24 viewBox 的 SVG 源文件。</li>
+            <li>导出 72 × 144 PNG 时，左帧填浅色映射，右帧填深色映射。</li>
+            <li>状态颜色进入 token 表，不写入 SVG 本身。</li>
+          </ul>
+        </article>
+        <article class="card" data-od-id="handoff-qa">
+          <h3>验收条件</h3>
+          <ul>
+            <li>卡片标题、折叠组标题、日志开关三者在视觉上必须一眼可区分。</li>
+            <li>滑块数值和文本输入在 100% 与 150% DPI 下基线一致。</li>
+            <li>14 个图标在 14px 与 24px 下轮廓完整，圆角与描边粗细一致。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      llama.cpp Service Console · 字体与图标实施规范 v1.0 · 所有颜色、字体与图标几何均按本文档固定，不在控件层覆盖。
+    </footer>
+  </main>
+</body>
+</html>

@@ -128,6 +128,7 @@ export function demoSnapshot(overrides = {}) {
       geometry: null,
       last_preset: '',
       motion_enabled: true,
+      mica_enabled: true,
       upd_channel: 'win-cuda-13.4-x64',
       upd_check_on_startup: true,
       services: ['QwenLLM', 'QwenVL', 'llama-bench'],

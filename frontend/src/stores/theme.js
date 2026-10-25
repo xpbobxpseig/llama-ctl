@@ -36,6 +36,13 @@ export const mode = computed(() =>
 /** The master animation switch. `false` = every animation jumps to its end state. */
 export const motion = computed(() => store.settings.value?.motion_enabled ?? true)
 
+/**
+ * The translucent window material (Mica). Off = the shell drops its window
+ * effects and paints opaque surfaces. Default is on, which is what the
+ * window was created with.
+ */
+export const mica = computed(() => store.settings.value?.mica_enabled ?? true)
+
 /** `true` when the user has asked for reduced motion, from either source. */
 export const reducedMotion = computed(
   () =>
@@ -95,6 +102,20 @@ export async function setLanguage(next) {
   if (!settings) return false
   const snap = await store.run('save_settings', () =>
     ipc.saveSettings({ ...settings, language: next }),
+  )
+  return snap !== null
+}
+
+/**
+ * Persist the translucent-material preference. The window side (effects on/off,
+ * the `mica-host` class) is applied by `DesignApp.vue`'s watcher on
+ * {@link mica} — this function only owns the persisted half.
+ */
+export async function setMica(next) {
+  const settings = store.settings.value
+  if (!settings) return false
+  const snap = await store.run('save_settings', () =>
+    ipc.saveSettings({ ...settings, mica_enabled: next }),
   )
   return snap !== null
 }

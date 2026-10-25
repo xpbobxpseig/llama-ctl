@@ -179,17 +179,13 @@ export const canInstall = computed(() => release.value !== null && !busy.value)
 export const backupPreview = computed(() => {
   const rel = release.value
   if (!rel) return ''
-  const root = backupRoot()
-  return `${root}\\${rel.tag}`
+  // Rust 的真实目录是 `<llama 安装目录>\backup\<tag>\<时间戳>`
+  // （snapshot.rs: root.join("backup") → update_files::backup_dir）。时间戳是
+  // 安装那一刻的，预览只到 <tag> 一级，并如实说明。
+  const dir = String(store.snapshot.snap?.facts?.app_dir ?? '').replace(/[\\/]+$/, '')
+  const root = dir || 'F:\\llama.cpp'
+  return `${root}\\backup\\${rel.tag}`
 })
-
-/** The backup root: `LLAMA_CTL_BACKUP_DIR` else `F:\llama_ctl\backup`. */
-function backupRoot() {
-  // The Python build's own constants (llama_ctl_gui.py L62-65). `InstallEnv`
-  // in Rust reads `LLAMA_CTL_LLAMA_DIR` only, so the backup root is not part
-  // of the Snapshot — the shape is mirrored here for the confirmation's copy.
-  return 'F:\\llama_ctl\\backup'
-}
 
 /** Reset everything — for tests. */
 export function reset() {

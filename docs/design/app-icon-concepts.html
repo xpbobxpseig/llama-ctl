@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llama.cpp Service Console · 应用图标方案</title>
+  <style>
+    :root {
+      --bg: #f2f4f7;
+      --surface: #ffffff;
+      --surface-2: #e9ecf0;
+      --surface-3: #dfe3e8;
+      --fg: #18181b;
+      --muted: #5f5f66;
+      --border: #d5d9df;
+      --border-strong: #b8bec7;
+      --accent: #0b5cb0;
+      --accent-bright: #0a6fd6;
+      --ok: #0f7b3d;
+      --ink: #18181b;
+      --dark-bg: #111113;
+      --dark-surface: #18181b;
+      --dark-surface-2: #25252a;
+      --dark-fg: #f4f4f5;
+      --dark-muted: #8e8e97;
+      --dark-border: #383840;
+      --font-display: "Segoe UI Variable Display", "Microsoft YaHei UI", "Segoe UI", "Noto Sans SC", sans-serif;
+      --font-ui: "Microsoft YaHei UI", "Segoe UI Variable Text", "Segoe UI", "Noto Sans SC", sans-serif;
+      --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+      --radius: 8px;
+      --shadow: 0 14px 38px rgba(24, 24, 27, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: light; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--fg);
+      background: var(--bg);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      line-height: 20px;
+      letter-spacing: 0;
+      text-rendering: optimizeLegibility;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1, h2, h3 { font-family: var(--font-display); }
+    button, input, select { font: inherit; }
+    code, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    .shell {
+      width: min(1480px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 28px 0 72px;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 28px;
+      align-items: end;
+      padding: 26px 0 28px;
+      border-bottom: 1px solid var(--border-strong);
+    }
+    .eyebrow {
+      margin-bottom: 8px;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 16px;
+      letter-spacing: 0.06em;
+    }
+    h1 {
+      max-width: 820px;
+      margin-bottom: 10px;
+      font-size: clamp(30px, 4.2vw, 46px);
+      font-weight: 600;
+      line-height: 1.26;
+      letter-spacing: 0;
+    }
+    .lede {
+      max-width: 74ch;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .summary-card {
+      padding: 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .summary-card h2 { margin-bottom: 10px; font-size: 16px; font-weight: 600; line-height: 22px; }
+    .summary-card p { margin-bottom: 0; color: var(--muted); font-size: 12px; line-height: 19px; }
+    .summary-list { display: grid; gap: 7px; margin-top: 14px; }
+    .summary-row { display: flex; justify-content: space-between; gap: 18px; padding-top: 7px; border-top: 1px solid var(--surface-2); }
+    .summary-row span:first-child { color: var(--muted); }
+    .summary-row span:last-child { font-family: var(--font-mono); font-size: 11px; text-align: right; }
+
+    .toc {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 12px 0;
+      background: color-mix(in srgb, var(--bg) 95%, transparent);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+    .toc a {
+      flex: 0 0 auto;
+      min-height: 36px;
+      padding: 8px 11px;
+      color: var(--muted);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 18px;
+      text-decoration: none;
+    }
+    .toc a:hover, .toc a:focus-visible {
+      color: var(--fg);
+      background: var(--surface);
+      border-color: var(--border);
+      outline: none;
+    }
+
+    section { padding-top: 54px; }
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 520px);
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+    .section-no {
+      display: inline-block;
+      margin-bottom: 6px;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 16px;
+      letter-spacing: 0.04em;
+    }
+    h2 { margin-bottom: 0; font-size: 24px; font-weight: 600; line-height: 32px; letter-spacing: 0; }
+    .section-head p { margin-bottom: 0; color: var(--muted); font-size: 13px; line-height: 21px; }
+
+    .criteria-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .audit-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .audit-item {
+      padding: 16px;
+      background: var(--dark-bg);
+      color: var(--dark-fg);
+      border-radius: var(--radius);
+    }
+    .audit-item span {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--dark-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 16px;
+    }
+    .audit-item strong { display: block; margin-bottom: 5px; font-size: 13px; font-weight: 600; line-height: 19px; }
+    .audit-item p { margin-bottom: 0; color: #d7d7dc; font-size: 11px; line-height: 17px; }
+    .criterion {
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .criterion strong { display: block; margin-bottom: 5px; font-size: 13px; font-weight: 600; line-height: 19px; }
+    .criterion p { margin-bottom: 0; color: var(--muted); font-size: 11px; line-height: 17px; }
+
+    .candidate {
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .candidate + .candidate { margin-top: 22px; }
+    .candidate-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: start;
+      padding: 20px 22px;
+      border-bottom: 1px solid var(--border);
+    }
+    .candidate-kicker {
+      margin-bottom: 5px;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 16px;
+      letter-spacing: 0.05em;
+    }
+    .candidate-head h3 { margin-bottom: 4px; font-size: 20px; font-weight: 600; line-height: 27px; }
+    .candidate-head p { max-width: 76ch; margin-bottom: 0; color: var(--muted); font-size: 13px; line-height: 20px; }
+    .candidate-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 380px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 4px 8px;
+      color: var(--muted);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 11px;
+      line-height: 16px;
+      white-space: nowrap;
+    }
+    .tag.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 32%, var(--border)); }
+
+    .candidate-body { display: grid; grid-template-columns: 320px minmax(0, 1fr); }
+    .candidate-hero {
+      display: grid;
+      place-items: center;
+      min-height: 360px;
+      padding: 28px;
+      background: var(--surface-2);
+      border-right: 1px solid var(--border);
+    }
+    .candidate-hero .hero-icon { width: 256px; height: 256px; }
+    .candidate-detail { padding: 22px; }
+    .candidate-detail h4 {
+      margin: 0 0 10px;
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 20px;
+    }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .detail-block { padding: 14px; background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; }
+    .detail-block strong { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 600; line-height: 18px; }
+    .detail-block p { margin-bottom: 0; color: var(--muted); font-size: 11px; line-height: 17px; }
+    .detail-block.good strong { color: var(--ok); }
+    .detail-block.caution strong { color: #9a5b00; }
+    .detail-rule { margin-top: 10px; padding: 14px; background: var(--surface-2); border-radius: 6px; }
+    .detail-rule strong { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 600; line-height: 18px; }
+    .detail-rule p { margin-bottom: 0; color: var(--muted); font-size: 11px; line-height: 17px; }
+
+    .true-size-panel { padding: 20px 22px; border-top: 1px solid var(--border); }
+    .true-size-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: baseline;
+      margin-bottom: 14px;
+    }
+    .true-size-head h4 { margin: 0; font-size: 14px; font-weight: 600; line-height: 20px; }
+    .true-size-head p { margin: 0; color: var(--muted); font-size: 11px; line-height: 17px; }
+    .size-scroll { overflow-x: auto; padding: 2px 0 10px; }
+    .size-row { display: flex; align-items: flex-end; gap: 24px; min-width: max-content; min-height: 286px; padding: 14px 16px 18px; background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; }
+    .size-item { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 10px; }
+    .size-item svg { display: block; flex: 0 0 auto; }
+    .size-label { color: var(--muted); font-family: var(--font-mono); font-size: 11px; line-height: 16px; white-space: nowrap; }
+
+    .proof-strip {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+      padding: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .silhouette-box {
+      display: grid;
+      place-items: center;
+      width: 72px;
+      height: 72px;
+      background:
+        linear-gradient(45deg, #e5e7eb 25%, transparent 25%),
+        linear-gradient(-45deg, #e5e7eb 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #e5e7eb 75%),
+        linear-gradient(-45deg, transparent 75%, #e5e7eb 75%),
+        #f8fafc;
+      background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+      background-size: 12px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .proof-copy strong { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 600; line-height: 18px; }
+    .proof-copy p { margin-bottom: 0; color: var(--muted); font-size: 11px; line-height: 17px; }
+
+    .status-table-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
+    table { width: 100%; min-width: 820px; border-collapse: collapse; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-size: 12px; line-height: 18px; }
+    th { color: var(--muted); background: #f8fafc; font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    .code { font-family: var(--font-mono); font-size: 11px; }
+
+    .swatch-row {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .swatch {
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .swatch-color { height: 58px; }
+    .swatch-meta { padding: 10px 12px; }
+    .swatch-meta strong { display: block; margin-bottom: 2px; font-size: 12px; font-weight: 600; line-height: 18px; }
+    .swatch-meta span { color: var(--muted); font-family: var(--font-mono); font-size: 11px; line-height: 16px; }
+
+    .recommendation {
+      display: grid;
+      grid-template-columns: 256px minmax(0, 1fr);
+      gap: 24px;
+      align-items: center;
+      padding: 24px;
+      background: var(--dark-bg);
+      color: var(--dark-fg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .recommendation .recommend-icon { display: grid; place-items: center; padding: 18px; background: #fff; border-radius: 8px; }
+    .recommendation h2 { color: var(--dark-fg); }
+    .recommendation .rec-kicker { margin: 0 0 8px; color: var(--dark-muted); font-family: var(--font-mono); font-size: 11px; line-height: 16px; letter-spacing: 0.05em; }
+    .recommendation p { margin-bottom: 0; color: #d7d7dc; font-size: 13px; line-height: 21px; }
+    .recommendation p + p { margin-top: 8px; }
+
+    .compare-wrap { overflow-x: auto; margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .compare-wrap table { min-width: 920px; }
+    .compare-icon { width: 42px; height: 42px; display: block; }
+
+    .implementation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .implementation-card { padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .implementation-card h3 { margin-bottom: 7px; font-size: 13px; font-weight: 600; line-height: 19px; }
+    .implementation-card p { margin-bottom: 0; color: var(--muted); font-size: 11px; line-height: 17px; }
+
+    footer {
+      margin-top: 60px;
+      padding-top: 20px;
+      color: var(--muted);
+      border-top: 1px solid var(--border-strong);
+      font-size: 11px;
+      line-height: 18px;
+    }
+
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+    @media (max-width: 1120px) {
+      .masthead, .section-head { grid-template-columns: 1fr; }
+      .criteria-grid, .audit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .candidate-body { grid-template-columns: 1fr; }
+      .candidate-hero { min-height: 320px; border-right: 0; border-bottom: 1px solid var(--border); }
+      .implementation-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 780px) {
+      .shell { width: min(100% - 24px, 1480px); padding-top: 10px; }
+      .candidate-head { grid-template-columns: 1fr; }
+      .candidate-tags { justify-content: flex-start; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .proof-strip { grid-template-columns: 1fr; }
+      .silhouette-box { justify-self: start; }
+      .swatch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .recommendation { grid-template-columns: 1fr; }
+      .recommendation .recommend-icon { justify-self: start; }
+    }
+
+    @media (max-width: 520px) {
+      .toc { margin-inline: -12px; padding-inline: 12px; }
+      .criteria-grid, .audit-grid { grid-template-columns: 1fr; }
+      .candidate-hero { padding: 20px; }
+      .candidate-hero .hero-icon { max-width: 100%; height: auto; }
+      .candidate-detail, .true-size-panel { padding: 18px; }
+      .swatch-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="visually-hidden" aria-hidden="true">
+    <defs>
+      <symbol id="icon-llama-pulse" viewBox="0 0 256 256">
+        <rect x="8" y="8" width="240" height="240" rx="52" fill="#0b5cb0"/>
+        <path d="M62 210c4-39 10-74 15-105l7-36 25 24 19-39 21 34c28 6 45 27 48 54l7 36c3 15-7 28-22 28h-35c-16 0-30-10-36-25l-11-26-11 55z" fill="#ffffff"/>
+        <circle cx="157" cy="137" r="8" fill="#0b5cb0"/>
+        <path d="M119 180h17l10-18 12 34 10-22h23" fill="none" stroke="#0b5cb0" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      </symbol>
+
+      <symbol id="icon-rack-node" viewBox="0 0 256 256">
+        <rect x="8" y="8" width="240" height="240" rx="52" fill="#18181b"/>
+        <rect x="48" y="56" width="160" height="38" rx="13" fill="#ffffff"/>
+        <rect x="48" y="109" width="160" height="38" rx="13" fill="#ffffff"/>
+        <rect x="48" y="162" width="160" height="38" rx="13" fill="#0f7b3d"/>
+        <path d="M73 75h45M149 75h34" fill="none" stroke="#0b5cb0" stroke-width="9" stroke-linecap="round"/>
+        <circle cx="73" cy="75" r="8" fill="#0b5cb0"/>
+        <circle cx="118" cy="75" r="8" fill="#0b5cb0"/>
+        <circle cx="183" cy="75" r="8" fill="#0b5cb0"/>
+        <path d="M72 128h112" fill="none" stroke="#0b5cb0" stroke-width="9" stroke-linecap="round"/>
+        <path d="M72 181h34" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+      </symbol>
+
+      <symbol id="icon-model-stack" viewBox="0 0 256 256">
+        <rect x="8" y="8" width="240" height="240" rx="52" fill="#ffffff"/>
+        <rect x="13" y="13" width="230" height="230" rx="47" fill="none" stroke="#0b5cb0" stroke-width="10"/>
+        <rect x="49" y="52" width="158" height="42" rx="12" fill="#0b5cb0"/>
+        <rect x="68" y="107" width="140" height="42" rx="12" fill="#0a6fd6"/>
+        <rect x="49" y="162" width="158" height="42" rx="12" fill="#0f7b3d"/>
+        <path d="M77 73h32M128 73h51" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
+        <circle cx="77" cy="73" r="7" fill="#ffffff"/>
+        <circle cx="109" cy="73" r="7" fill="#ffffff"/>
+        <circle cx="179" cy="73" r="7" fill="#ffffff"/>
+        <path d="M94 128h68" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
+        <path d="M77 183h44" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+        <path d="M134 183h46" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+      </symbol>
+
+      <symbol id="silhouette-llama" viewBox="0 0 256 256">
+        <path d="M62 210c4-39 10-74 15-105l7-36 25 24 19-39 21 34c28 6 45 27 48 54l7 36c3 15-7 28-22 28h-35c-16 0-30-10-36-25l-11-26-11 55z" fill="#000000"/>
+      </symbol>
+
+      <symbol id="silhouette-rack" viewBox="0 0 256 256">
+        <rect x="48" y="56" width="160" height="38" rx="13" fill="#000000"/>
+        <rect x="48" y="109" width="160" height="38" rx="13" fill="#000000"/>
+        <rect x="48" y="162" width="160" height="38" rx="13" fill="#000000"/>
+      </symbol>
+
+      <symbol id="silhouette-model-stack" viewBox="0 0 256 256">
+        <rect x="49" y="52" width="158" height="42" rx="12" fill="#000000"/>
+        <rect x="68" y="107" width="140" height="42" rx="12" fill="#000000"/>
+        <rect x="49" y="162" width="158" height="42" rx="12" fill="#000000"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <main class="shell">
+    <header class="masthead" data-od-id="app-icon-header">
+      <div>
+        <p class="eyebrow">APP ICON / WINDOWS DESKTOP / V1.0</p>
+        <h1>llama.cpp Service Console<br>应用图标三方案</h1>
+        <p class="lede">现版本的问题不在绘制质量，而在语义：蓝色渐变底板与终端提示符只说明“这是一个控制台”，没有说明本地模型、服务状态和控制关系。以下方案均以 16px 可辨识为硬门槛，只使用现有品牌色。</p>
+      </div>
+      <aside class="summary-card" aria-label="方案摘要">
+        <h2>本轮判断标准</h2>
+        <p>每个候选都同时看真实尺寸、黑色轮廓和状态承载方式。推荐方案不是主观偏好，而是在 16px 下保留最多语义的方案。</p>
+        <div class="summary-list">
+          <div class="summary-row"><span>画布</span><span>256 × 256 unit</span></div>
+          <div class="summary-row"><span>显示尺寸</span><span>16 / 24 / 32 / 48 / 64 / 128 / 256</span></div>
+          <div class="summary-row"><span>底板</span><span>纯色或近纯色</span></div>
+          <div class="summary-row"><span>色彩</span><span>仅蓝 / 绿 / 墨黑 / 白</span></div>
+        </div>
+      </aside>
+    </header>
+
+    <nav class="toc" aria-label="页面目录">
+      <a href="#foundation">设计判断</a>
+      <a href="#candidate-a">方案 A · 巡诊羊驼</a>
+      <a href="#candidate-b">方案 B · 机架节点</a>
+      <a href="#candidate-c">方案 C · 模型叠层</a>
+      <a href="#compare">横向比较</a>
+      <a href="#recommend">推荐结论</a>
+      <a href="#handoff">导出说明</a>
+    </nav>
+
+    <section id="foundation" data-od-id="icon-foundation-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">01 / FOUNDATION</span>
+          <h2>先修语义，再修外形</h2>
+        </div>
+        <p>终端提示符是工具类型，不是产品身份。新图标必须同时说出“本地模型”和“可控服务”，并且不能依赖大尺寸下才成立的细节。</p>
+      </div>
+      <div class="audit-grid" aria-label="现版本图标审计">
+        <article class="audit-item" data-od-id="audit-gradient"><span>缺陷 01</span><strong>斜向蓝色渐变</strong><p><span class="code">#4aa6ff → #055ad4</span>，表面明度比 2.39:1。视觉语言偏旧，且同一白色标记的对比度从 2.56:1 波动到 6.14:1。</p></article>
+        <article class="audit-item" data-od-id="audit-mark"><span>缺陷 02</span><strong>主体是 <span class="code">&gt;_</span> 提示符</strong><p>它只说明“终端控制台”，无法说明 llama.cpp、本地模型、推理服务或进程控制。</p></article>
+        <article class="audit-item" data-od-id="audit-status"><span>缺陷 03</span><strong>16px 状态点失效</strong><p>原绿色圆点在 16px 下约 3.8px，缩小后像模糊色斑，难以稳定表达“服务运行中”。</p></article>
+        <article class="audit-item" data-od-id="audit-result"><span>处理结果</span><strong>三案全部重建语义</strong><p>去掉渐变与终端提示符；使用平板底板，并把状态改为完整槽位、轨道或由主体健康脉冲承担。</p></article>
+      </div>
+      <div class="criteria-grid">
+        <article class="criterion" data-od-id="criterion-flat-plate">
+          <strong>平板化底板</strong>
+          <p>三案均为纯色底板，明度比 1.00:1；不恢复斜向渐变、高光、内阴影或厚重投影。</p>
+        </article>
+        <article class="criterion" data-od-id="criterion-16px">
+          <strong>16px 优先</strong>
+          <p>缩到 16px 后仍能识别主要轮廓；不放细线、不保留靠颜色才可分离的相邻形状。</p>
+        </article>
+        <article class="criterion" data-od-id="criterion-purpose">
+          <strong>表达本地 AI 服务</strong>
+          <p>使用羊驼、模型层、节点网络和机架槽位中的两类语义组合，不把终端提示符作为主体。</p>
+        </article>
+        <article class="criterion" data-od-id="criterion-status">
+          <strong>状态不是装饰</strong>
+          <p>保留状态时必须使用连续形状或完整槽位；不再使用 16px 下不可辨认的小圆点。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="candidate-a" data-od-id="candidate-a-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">02 / CANDIDATE A</span>
+          <h2>方案 A · 巡诊羊驼</h2>
+        </div>
+        <p>用羊驼侧脸直接说明本地模型，用贯穿身体的心电脉冲说明服务健康。轮廓优先，状态不另加小圆点。</p>
+      </div>
+
+      <article class="candidate" data-od-id="candidate-llama-pulse">
+        <header class="candidate-head">
+          <div>
+            <p class="candidate-kicker">LLAMA + HEALTH PULSE</p>
+            <h3>羊驼本体就是服务状态</h3>
+            <p>白色羊驼侧脸占据主要视觉区域，颈部内嵌蓝色脉冲线。脉冲在 32px 以上可读，16px 时即使细节丢失，头部与耳朵仍能维持独特轮廓。</p>
+          </div>
+          <div class="candidate-tags">
+            <span class="tag">纯色蓝底板</span>
+            <span class="tag">无独立状态点</span>
+            <span class="tag ok">语义最直接</span>
+          </div>
+        </header>
+        <div class="candidate-body">
+          <div class="candidate-hero">
+            <svg class="hero-icon" viewBox="0 0 256 256" role="img" aria-label="巡诊羊驼应用图标大图"><use href="#icon-llama-pulse"/></svg>
+          </div>
+          <div class="candidate-detail">
+            <h4>设计依据</h4>
+            <div class="detail-grid">
+              <div class="detail-block good"><strong>识别优势</strong><p>羊驼侧脸与耳朵形成非对称轮廓，不依赖颜色或内部细节，16px 仍能区别于通用工具图标。</p></div>
+              <div class="detail-block"><strong>状态策略</strong><p>不加右上角状态点。健康语义由脉冲线承担，避免小尺寸状态下出现不可读的绿色像素。</p></div>
+              <div class="detail-block good"><strong>底板</strong><p><span class="code">#0b5cb0</span> 纯色，圆角半径 52/256，适合 Windows 圆角方形图标外壳。</p></div>
+              <div class="detail-block caution"><strong>代价</strong><p>脉冲线在 16px 下会消失，只剩羊驼本体；用户会先识别“本地模型”，再在大尺寸界面中读到“健康”。</p></div>
+            </div>
+            <div class="detail-rule"><strong>几何约束</strong><p>羊驼头部保持在 32–210 单位范围内，最大边距 46 单位；耳朵顶点不低于 58 单位。脉冲线使用 10 单位圆角描边，与大图标视觉重量一致。</p></div>
+          </div>
+        </div>
+        <div class="true-size-panel">
+          <div class="true-size-head"><h4>真实显示尺寸</h4><p>按实际 CSS 像素渲染，不放大、不美化</p></div>
+          <div class="size-scroll">
+            <div class="size-row">
+              <div class="size-item"><svg width="16" height="16" viewBox="0 0 256 256" aria-label="16px"><use href="#icon-llama-pulse"/></svg><span class="size-label">16 px</span></div>
+              <div class="size-item"><svg width="24" height="24" viewBox="0 0 256 256" aria-label="24px"><use href="#icon-llama-pulse"/></svg><span class="size-label">24 px</span></div>
+              <div class="size-item"><svg width="32" height="32" viewBox="0 0 256 256" aria-label="32px"><use href="#icon-llama-pulse"/></svg><span class="size-label">32 px</span></div>
+              <div class="size-item"><svg width="48" height="48" viewBox="0 0 256 256" aria-label="48px"><use href="#icon-llama-pulse"/></svg><span class="size-label">48 px</span></div>
+              <div class="size-item"><svg width="64" height="64" viewBox="0 0 256 256" aria-label="64px"><use href="#icon-llama-pulse"/></svg><span class="size-label">64 px</span></div>
+              <div class="size-item"><svg width="128" height="128" viewBox="0 0 256 256" aria-label="128px"><use href="#icon-llama-pulse"/></svg><span class="size-label">128 px</span></div>
+              <div class="size-item"><svg width="256" height="256" viewBox="0 0 256 256" aria-label="256px"><use href="#icon-llama-pulse"/></svg><span class="size-label">256 px</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="proof-strip">
+          <div class="silhouette-box"><svg width="16" height="16" viewBox="0 0 256 256" aria-label="16px 黑色轮廓"><use href="#silhouette-llama"/></svg></div>
+          <div class="proof-copy"><strong>16px 黑色轮廓测试</strong><p>耳朵、右侧吻部和下方颈部保持三个清楚转折；不使用内部脉冲也能识别为羊驼头像。</p></div>
+          <div class="proof-copy"><strong>状态指示</strong><p>未保留独立圆点。如果后续必须增加运行状态，建议在大图标之外的状态卡中使用现有 dot-run 图标，不进入应用图标。</p></div>
+        </div>
+      </article>
+    </section>
+
+    <section id="candidate-b" data-od-id="candidate-b-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">03 / CANDIDATE B</span>
+          <h2>方案 B · 机架节点</h2>
+        </div>
+        <p>三层机架槽位表达本地服务，节点网络表达模型推理，绿色整层槽位承载运行状态，不需要额外小圆点。</p>
+      </div>
+
+      <article class="candidate" data-od-id="candidate-rack-node">
+        <header class="candidate-head">
+          <div>
+            <p class="candidate-kicker">SERVICE RACK + MODEL NODES</p>
+            <h3>服务进程与模型网络同时出现</h3>
+            <p>两条白色机架槽位表示受控进程，顶部蓝色节点线表示模型计算；第三条槽位通体使用成功绿，说明服务正在运行。缩到 16px 后仍能看到三根横向服务带。</p>
+          </div>
+          <div class="candidate-tags">
+            <span class="tag">纯墨黑底板</span>
+            <span class="tag">绿色整层状态</span>
+            <span class="tag ok">16px 稳定性最高</span>
+          </div>
+        </header>
+        <div class="candidate-body">
+          <div class="candidate-hero">
+            <svg class="hero-icon" viewBox="0 0 256 256" role="img" aria-label="机架节点应用图标大图"><use href="#icon-rack-node"/></svg>
+          </div>
+          <div class="candidate-detail">
+            <h4>设计依据</h4>
+            <div class="detail-grid">
+              <div class="detail-block good"><strong>识别优势</strong><p>横向槽位天然适配 Windows 小图标，边缘清楚，抗模糊能力优于细线条和复杂轮廓。</p></div>
+              <div class="detail-block good"><strong>状态策略</strong><p>保留状态，但不保留小圆点。绿色下槽完整有效，宽 160 单位、高 38 单位，在任何尺寸都作为形状存在。</p></div>
+              <div class="detail-block"><strong>底板</strong><p><span class="code">#18181b</span> 纯色，白色与蓝色元素提供清晰对比，适合深浅两种任务栏背景。</p></div>
+              <div class="detail-block caution"><strong>代价</strong><p>“本地 AI”主要依赖蓝色节点线，16px 时节点会合并；机架语义仍然成立，但不如羊驼具体。</p></div>
+            </div>
+            <div class="detail-rule"><strong>状态尺寸</strong><p>绿色下槽在 256 画布中为 160 × 38 单位，分别渲染为 16px：10.00 × 2.38px；24px：15.00 × 3.56px；32px：20.00 × 4.75px；48px：30.00 × 7.13px；64px：40.00 × 9.50px；128px：80.00 × 19.00px；256px：160.00 × 38.00px。</p></div>
+          </div>
+        </div>
+        <div class="true-size-panel">
+          <div class="true-size-head"><h4>真实显示尺寸</h4><p>按实际 CSS 像素渲染，不放大、不美化</p></div>
+          <div class="size-scroll">
+            <div class="size-row">
+              <div class="size-item"><svg width="16" height="16" viewBox="0 0 256 256" aria-label="16px"><use href="#icon-rack-node"/></svg><span class="size-label">16 px</span></div>
+              <div class="size-item"><svg width="24" height="24" viewBox="0 0 256 256" aria-label="24px"><use href="#icon-rack-node"/></svg><span class="size-label">24 px</span></div>
+              <div class="size-item"><svg width="32" height="32" viewBox="0 0 256 256" aria-label="32px"><use href="#icon-rack-node"/></svg><span class="size-label">32 px</span></div>
+              <div class="size-item"><svg width="48" height="48" viewBox="0 0 256 256" aria-label="48px"><use href="#icon-rack-node"/></svg><span class="size-label">48 px</span></div>
+              <div class="size-item"><svg width="64" height="64" viewBox="0 0 256 256" aria-label="64px"><use href="#icon-rack-node"/></svg><span class="size-label">64 px</span></div>
+              <div class="size-item"><svg width="128" height="128" viewBox="0 0 256 256" aria-label="128px"><use href="#icon-rack-node"/></svg><span class="size-label">128 px</span></div>
+              <div class="size-item"><svg width="256" height="256" viewBox="0 0 256 256" aria-label="256px"><use href="#icon-rack-node"/></svg><span class="size-label">256 px</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="proof-strip">
+          <div class="silhouette-box"><svg width="16" height="16" viewBox="0 0 256 256" aria-label="16px 黑色轮廓"><use href="#silhouette-rack"/></svg></div>
+          <div class="proof-copy"><strong>16px 黑色轮廓测试</strong><p>三层槽位在 16px 下形成清楚的“堆叠服务”轮廓，顶部节点连接仍可读作模型网络。</p></div>
+          <div class="proof-copy"><strong>状态指示尺寸</strong><p>绿色槽位在 16px 时为 10.00 × 2.38px，属于可感知的连续横条，不再是约 1px 的孤立圆点。</p></div>
+        </div>
+        <div class="status-table-wrap">
+          <table aria-label="机架节点状态尺寸表">
+            <thead><tr><th>图标尺寸</th><th>绿色状态槽宽</th><th>绿色状态槽高</th><th>可感知方式</th></tr></thead>
+            <tbody>
+              <tr><td>16 px</td><td class="num">10.00 px</td><td class="num">2.38 px</td><td>下沿绿色横条</td></tr>
+              <tr><td>24 px</td><td class="num">15.00 px</td><td class="num">3.56 px</td><td>明确的服务层</td></tr>
+              <tr><td>32 px</td><td class="num">20.00 px</td><td class="num">4.75 px</td><td>明确的服务层</td></tr>
+              <tr><td>48 px</td><td class="num">30.00 px</td><td class="num">7.13 px</td><td>可与节点线清晰分离</td></tr>
+              <tr><td>64 px</td><td class="num">40.00 px</td><td class="num">9.50 px</td><td>完整机架语义</td></tr>
+              <tr><td>128 px</td><td class="num">80.00 px</td><td class="num">19.00 px</td><td>完整机架语义</td></tr>
+              <tr><td>256 px</td><td class="num">160.00 px</td><td class="num">38.00 px</td><td>完整机架语义</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="candidate-c" data-od-id="candidate-c-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">04 / CANDIDATE C</span>
+          <h2>方案 C · 模型叠层</h2>
+        </div>
+        <p>三层模型块表达本地权重文件，节点连线表达推理网络，底部整层绿色表达服务受控且健康。整体更接近“模型资源”，弱于“进程控制”。</p>
+      </div>
+
+      <article class="candidate" data-od-id="candidate-model-stack">
+        <header class="candidate-head">
+          <div>
+            <p class="candidate-kicker">MODEL LAYERS + SERVICE RAIL</p>
+            <h3>把本地模型当成一块可管理的资源</h3>
+            <p>白色底板配蓝色边框，两层蓝色模型块表达本地模型文件；内部节点连线说明 AI 模型，底部整层成功绿承载可控运行状态。</p>
+          </div>
+          <div class="candidate-tags">
+            <span class="tag">白色纯色底板</span>
+            <span class="tag">绿色底部整层</span>
+            <span class="tag">通用 AI 语义</span>
+          </div>
+        </header>
+        <div class="candidate-body">
+          <div class="candidate-hero">
+            <svg class="hero-icon" viewBox="0 0 256 256" role="img" aria-label="模型叠层应用图标大图"><use href="#icon-model-stack"/></svg>
+          </div>
+          <div class="candidate-detail">
+            <h4>设计依据</h4>
+            <div class="detail-grid">
+              <div class="detail-block good"><strong>识别优势</strong><p>三层模型块在 16px 下形成规则堆叠轮廓，阅读速度快，适合任务栏与文件关联图标。</p></div>
+              <div class="detail-block"><strong>状态策略</strong><p>第三层整体使用成功绿，作为完整横向形状存在。16px 时可读为绿色服务层，而不是状态点。</p></div>
+              <div class="detail-block"><strong>底板</strong><p><span class="code">#ffffff</span> 纯色底板配 <span class="code">#0b5cb0</span> 10 单位边框，浅色系统中仍保持边界。</p></div>
+              <div class="detail-block caution"><strong>代价</strong><p>节点与堆叠层更像通用 AI 资源图标，必须依靠应用名称和界面上下文补足“llama.cpp 服务控制”的含义。</p></div>
+            </div>
+            <div class="detail-rule"><strong>状态尺寸</strong><p>绿色第三层在 256 画布中为 158 × 42 单位。16px 时对应 9.88 × 2.63px，24px 时为 14.81 × 3.94px；连续面积足够稳定承载“运行中”，不需要额外状态点。</p></div>
+          </div>
+        </div>
+        <div class="true-size-panel">
+          <div class="true-size-head"><h4>真实显示尺寸</h4><p>按实际 CSS 像素渲染，不放大、不美化</p></div>
+          <div class="size-scroll">
+            <div class="size-row">
+              <div class="size-item"><svg width="16" height="16" viewBox="0 0 256 256" aria-label="16px"><use href="#icon-model-stack"/></svg><span class="size-label">16 px</span></div>
+              <div class="size-item"><svg width="24" height="24" viewBox="0 0 256 256" aria-label="24px"><use href="#icon-model-stack"/></svg><span class="size-label">24 px</span></div>
+              <div class="size-item"><svg width="32" height="32" viewBox="0 0 256 256" aria-label="32px"><use href="#icon-model-stack"/></svg><span class="size-label">32 px</span></div>
+              <div class="size-item"><svg width="48" height="48" viewBox="0 0 256 256" aria-label="48px"><use href="#icon-model-stack"/></svg><span class="size-label">48 px</span></div>
+              <div class="size-item"><svg width="64" height="64" viewBox="0 0 256 256" aria-label="64px"><use href="#icon-model-stack"/></svg><span class="size-label">64 px</span></div>
+              <div class="size-item"><svg width="128" height="128" viewBox="0 0 256 256" aria-label="128px"><use href="#icon-model-stack"/></svg><span class="size-label">128 px</span></div>
+              <div class="size-item"><svg width="256" height="256" viewBox="0 0 256 256" aria-label="256px"><use href="#icon-model-stack"/></svg><span class="size-label">256 px</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="proof-strip">
+          <div class="silhouette-box"><svg width="16" height="16" viewBox="0 0 256 256" aria-label="16px 黑色轮廓"><use href="#silhouette-model-stack"/></svg></div>
+          <div class="proof-copy"><strong>16px 黑色轮廓测试</strong><p>三层错位块形成稳定堆叠轮廓，能读作模型资源或文件层，但无法单独说明羊驼或 llama.cpp。</p></div>
+          <div class="proof-copy"><strong>状态指示尺寸</strong><p>绿色第三层在 16px 为 9.88 × 2.63px，在 24px 为 14.81 × 3.94px，作为完整模型层而不是孤立小点存在。</p></div>
+        </div>
+      </article>
+    </section>
+
+    <section id="compare" data-od-id="comparison-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">05 / COMPARISON</span>
+          <h2>三案横向比较</h2>
+        </div>
+        <p>判断顺序固定为：16px 识别、产品语义、状态表达、深浅背景适配。美学只在通过前四项后参与排序。</p>
+      </div>
+      <div class="compare-wrap">
+        <table aria-label="候选图标比较表">
+          <thead>
+            <tr>
+              <th>方案</th>
+              <th>16px 轮廓</th>
+              <th>本地 AI 语义</th>
+              <th>服务控制语义</th>
+              <th>状态表达</th>
+              <th>主要优点</th>
+              <th>主要风险</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><svg class="compare-icon" viewBox="0 0 256 256" aria-hidden="true"><use href="#icon-llama-pulse"/></svg><br><strong>巡诊羊驼</strong></td>
+              <td>强 · 羊驼侧脸轮廓独特</td>
+              <td>最强 · 直接指向 llama</td>
+              <td>中 · 由脉冲暗示健康与控制</td>
+              <td>无独立状态点</td>
+              <td>最容易被记住，语义与产品名一致</td>
+              <td>脉冲细节在 16px 丢失，轮廓需要精细修正</td>
+            </tr>
+            <tr>
+              <td><svg class="compare-icon" viewBox="0 0 256 256" aria-hidden="true"><use href="#icon-rack-node"/></svg><br><strong>机架节点</strong></td>
+              <td>最强 · 三根横向槽位稳定</td>
+              <td>中 · 节点网络表达模型</td>
+              <td>最强 · 机架与状态层明确</td>
+              <td>绿色整层，16px 可感知</td>
+              <td>小尺寸最稳，状态表达最可靠</td>
+              <td>产品辨识更依赖 llama.cpp 名称</td>
+            </tr>
+            <tr>
+              <td><svg class="compare-icon" viewBox="0 0 256 256" aria-hidden="true"><use href="#icon-model-stack"/></svg><br><strong>模型叠层</strong></td>
+              <td>强 · 三层堆叠清楚</td>
+              <td>中 · 模型文件语义明确</td>
+              <td>中弱 · 更像资源而非服务</td>
+              <td>绿色底部整层，16px 稳定</td>
+              <td>扁平、专业，适合资源管理语境</td>
+              <td>通用 AI 感最强，控制语义最弱</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="recommend" data-od-id="recommendation-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">06 / RECOMMENDATION</span>
+          <h2>推荐方案：巡诊羊驼</h2>
+        </div>
+        <p>产品名称已经包含 llama，图标正需要用最少的形状把这个名字变成资产。</p>
+      </div>
+      <div class="recommendation">
+        <div class="recommend-icon"><svg width="192" height="192" viewBox="0 0 256 256" role="img" aria-label="推荐方案巡诊羊驼"><use href="#icon-llama-pulse"/></svg></div>
+        <div>
+          <p class="rec-kicker">RECOMMENDED / CANDIDATE A</p>
+          <h2>先品牌识别，再服务状态</h2>
+          <p>方案 A 是唯一能在 16px 下同时保留独特轮廓和“llama”名称联想的候选。它与 llama.cpp Service Console 的产品身份直接一致，不会像机架或模型叠层那样落入通用服务器或通用 AI 工具的外观。</p>
+          <p>状态指示应留在应用界面内部：状态卡继续使用现有 dot-run 图标，应用图标本身不再塞入小绿点。落地时按本页轮廓把吻部收直、耳朵拉开，并在 14px 至 18px 区间单独做一次像素预览，确保任务栏尺寸仍然清楚。</p>
+        </div>
+      </div>
+    </section>
+
+    <section data-od-id="palette-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">07 / PALETTE</span>
+          <h2>只使用现有产品色</h2>
+        </div>
+        <p>三案不引入新的品牌色。状态绿只用于运行语义，不参与底板或普通图形装饰。</p>
+      </div>
+      <div class="swatch-row">
+        <article class="swatch"><div class="swatch-color" style="background:#0b5cb0"></div><div class="swatch-meta"><strong>主蓝</strong><span>#0b5cb0</span></div></article>
+        <article class="swatch"><div class="swatch-color" style="background:#0a6fd6"></div><div class="swatch-meta"><strong>亮蓝</strong><span>#0a6fd6</span></div></article>
+        <article class="swatch"><div class="swatch-color" style="background:#0f7b3d"></div><div class="swatch-meta"><strong>运行绿</strong><span>#0f7b3d</span></div></article>
+        <article class="swatch"><div class="swatch-color" style="background:#18181b"></div><div class="swatch-meta"><strong>墨黑</strong><span>#18181b</span></div></article>
+        <article class="swatch"><div class="swatch-color" style="background:#ffffff; border-bottom:1px solid var(--border)"></div><div class="swatch-meta"><strong>表面白</strong><span>#ffffff</span></div></article>
+      </div>
+    </section>
+
+    <section id="handoff" data-od-id="icon-handoff-section">
+      <div class="section-head">
+        <div>
+          <span class="section-no">08 / HANDOFF</span>
+          <h2>从 SVG 到 Windows 图标资源</h2>
+        </div>
+        <p>交付时保留 256 单位 SVG 源文件，再按 Windows 所需的实际尺寸导出 PNG 或 ICO；不要重新画小尺寸版本。</p>
+      </div>
+      <div class="implementation-grid">
+        <article class="implementation-card" data-od-id="handoff-source">
+          <h3>SVG 源文件</h3>
+          <p>使用 256 × 256 viewBox；所有坐标保持整数或 0.5 单位；底板圆角半径固定 52 单位。颜色写在构建映射中，不写在路径内部。</p>
+        </article>
+        <article class="implementation-card" data-od-id="handoff-export">
+          <h3>导出尺寸</h3>
+          <p>至少输出 16、20、24、32、40、48、64、128、256 px，并生成多尺寸 ICO。16–24px 复核描边和状态色，不单独改变主体比例。</p>
+        </article>
+        <article class="implementation-card" data-od-id="handoff-qa">
+          <h3>验收检查</h3>
+          <p>在 Windows 浅色任务栏、深色任务栏、文件资源管理器、开始菜单和窗口标题栏各查看一次；任何尺寸都不得出现彩色边、糊边或状态色丢失。</p>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      llama.cpp Service Console · 应用图标候选方案 v1.0 · 所有候选均使用内联 SVG 与产品现有色彩，不引用远程资源。
+    </footer>
+  </main>
+</body>
+</html>

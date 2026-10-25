@@ -7,7 +7,8 @@
 
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, HttpBody, RegHive};
 
@@ -17,6 +18,30 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// `0x80070002` — the key or value simply is not there.
 const HRESULT_FILE_NOT_FOUND: i32 = -2_147_478_360;
+
+/// Every HTTP call goes through one agent with hard timeouts.
+///
+/// Without these, a stalled GitHub connection (the updater's releases page or a
+/// ~400 MB asset) hangs the calling thread *forever* — and the thread holding
+/// the app's state mutex is what used to look like a frozen window.
+///
+/// ureq 3 has no per-read inactivity timeout: `timeout_recv_body` is a **total
+/// budget** over the whole body ("the budget is not restarted for each read").
+/// A 60 s value killed every large download at the one-minute mark, so it has
+/// to be generous enough for a slow link to land a ~400 MB zip — 30 minutes
+/// still bounds a dead-but-open connection, which is the hang that mattered.
+fn agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        let config = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_resolve(Some(Duration::from_secs(10)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .timeout_recv_body(Some(Duration::from_secs(30 * 60)))
+            .build();
+        ureq::Agent::new_with_config(config)
+    })
+}
 
 /// The real implementation. Stateless: everything is per-call.
 #[derive(Debug, Default, Clone, Copy)]
@@ -80,9 +105,16 @@ fn open_key(path: &str) -> Result<windows_registry::Key, DepsError> {
 fn is_absent(e: &windows_result::Error) -> bool {
     e.code().0 == HRESULT_FILE_NOT_FOUND
 }
+/// ureq 的 `read_to_vec` 默认 10 MiB 上限（防内存滥用），而官方更新包是
+/// 数百 MB 的 zip——下载从未可能成功。抬到 2 GiB：装得下最大资产，也仍
+/// 挡得住失控响应。
+const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// Read a response body to bytes.
 fn read_body(mut body: ureq::Body) -> Result<Vec<u8>, DepsError> {
-    body.read_to_vec()
+    body.with_config()
+        .limit(MAX_DOWNLOAD_BYTES)
+        .read_to_vec()
         .map_err(|e| DepsError::new(DepsErrorKind::Network, format!("read body: {e}")))
 }
 impl Deps for RealDeps {
@@ -174,7 +206,8 @@ impl Deps for RealDeps {
 
     fn http_get(&self, url: &str) -> Result<HttpBody, DepsError> {
         // GitHub rejects requests without a User-Agent.
-        let resp = ureq::get(url)
+        let resp = agent()
+            .get(url)
             .header("User-Agent", "llama_ctl-updater/1.0")
             .call()
             .map_err(|e| DepsError::new(DepsErrorKind::Network, format!("{url}: {e}")))?;
@@ -195,7 +228,8 @@ impl Deps for RealDeps {
         // `/health` on current builds, `/healthz` on older ones.
         for path in ["/health", "/healthz"] {
             let url = format!("http://{host}:{port}{path}");
-            let Ok(resp) = ureq::get(&url)
+            let Ok(resp) = agent()
+                .get(&url)
                 .header("User-Agent", "llama_ctl-updater/1.0")
                 .call()
             else {

@@ -12,14 +12,18 @@
   "app": {
     "windows": [
       {
-        "title": "llama.cpp 服务控制台",
+        "title": "拉马管家",
         "width": 1080,
         "height": 820,
         "minWidth": 880,
         "minHeight": 640,
         "resizable": true,
         "center": true,
-        "decorations": true,
+        "decorations": false,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["acrylic"]
+        },
         "theme": null
       }
     ],

@@ -5,7 +5,8 @@ a = Analysis(
     ['llama_ctl_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('llama_icon.ico', '.'), ('ic_trash.png', '.')],
+    datas=[('llama_icon.ico', '.'), ('assets/icons/*.png', 'assets/icons'),
+           ('THIRD-PARTY-NOTICES.txt', '.')],   # 图标为 Phosphor(MIT) 派生，声明须随分发件同附
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

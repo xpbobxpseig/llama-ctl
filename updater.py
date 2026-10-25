@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import zipfile
+import time
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urljoin, urlparse
@@ -197,19 +198,25 @@ def is_valid_zip(path):
     except Exception:  # noqa: BLE001 - 损坏/权限/IO 一律视为不可用
         return False
 
-def download(url, dest, progress=None):
+def download(url, dest, progress=None, attempts=10, backoff=1.5):
     """流式下载到 dest（先写 .part 再原子改名）。progress(done, total)。
 
     完整性（关键）：`resp.read()` 在**连接提前断开**时返回空串，与「正常读完」
     走同一出口。若不加校验就 os.replace，残缺文件会被转正成「已下载」并被缓存
     复用，导致更新永久失败（实测：某次主二进制只落地 1,061,602 B / 应为
-    149,703,589 B，此后每次重试都复用该坏文件）。
-    故：
-      - Content-Length 可知 → 校验 done == total，不足即抛 UpdateError；
-      - Content-Length 不可知 → 用 is_valid_zip 兜底校验产物。
-    失败路径必须清理 .part，且绝不产出 dest。
+    149,703,589 B）。
+    故长度相符之外**还要验内容**：实测有一份文件长度逐字节等于 Content-Length、
+    中央目录也完好，但 92.65% 的字节是 0，只信长度就会把它转正成缓存，之后每次
+    解压都在 cublas64_13.dll 上报 Bad CRC-32。长度已知不足 → 中断；否则一律
+    is_valid_zip()（逐条目 CRC）无误才转正。转正前绝不产出 dest。
+
+    重试 + 断点续传（关键）：候选 CDN（release-assets.githubusercontent.com）
+    实测**间歇性中断**——同一 URL 连下 5 次有 1 次被切断（另有 1 次拖到 226s），
+    是链路/CDN 抖动而非服务端问题。单发下载会让一次抖动直接毁掉整次更新，故
+    本函数自带重试（attempts 次，逐次退避）；服务端支持 Range（实测 206），
+    重试时**从已有字节续传**，不必重下整个 400 MB。重试尽数失败才抛 UpdateError
+    （附最后一条原因），并清理 .part、绝不产出 dest。
     """
-    req = Request(url, headers={"User-Agent": USER_AGENT})
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
     tmp = dest + ".part"
 
@@ -219,42 +226,108 @@ def download(url, dest, progress=None):
         except OSError:
             pass
 
-    try:
-        with urlopen(req, timeout=60) as resp:
-            total = 0
-            try:
-                total = int(resp.headers.get("Content-Length") or 0)
-            except (TypeError, ValueError):
+    last_err = None
+    total = 0            # 目标总长（首次响应已知后固定，供续传判断）
+    done = 0             # 已落盘字节（续传时从 .part 现有长度起步）
+    for attempt in range(max(1, attempts)):
+        if attempt:
+            time.sleep(min(backoff * attempt, 8))   # 退避：1.5s,3s,4.5s…（测试传 0）
+        try:
+            if os.path.isfile(tmp):
+                done = os.path.getsize(tmp)
+            else:
+                done = 0
+            # 已知总长时，残留 .part 若已达/超过总长，说明是上一轮的坏样本
+            # （长度对但内容坏，如清零文件）——不能拿它续传，从头来。
+            # 注意必须**同时清掉 total**：否则下一轮仍按旧总长判断，会发出
+            # `Range: bytes=<总长>-` 这种必然 416 的请求（实测真实 CDN 对
+            # 起始偏移==文件长度返回 416），把已完整落盘的数据删掉后反复空转。
+            if total > 0 and done >= total:
+                _cleanup_tmp()
+                done = 0
                 total = 0
-            done = 0
-            with open(tmp, "wb") as fh:
-                while True:
-                    chunk = resp.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-                    done += len(chunk)
-                    if progress and total > 0:
-                        progress(done, total)
-        # 长度可知：字节数不符即连接被截断（或服务端声明有误），不得转正
-        if total > 0 and done != total:
-            _cleanup_tmp()
-            raise UpdateError(
-                "下载不完整：%s 收到 %d / %d 字节（连接中断），已丢弃，请重试"
-                % (os.path.basename(dest), done, total))
-        # 长度不可知：退回内容校验，确保产物真是可用 zip
-        if total <= 0 and not is_valid_zip(tmp):
-            _cleanup_tmp()
-            raise UpdateError(
-                "下载内容校验失败：%s 不是有效的 zip（可能被截断），已丢弃，请重试"
-                % os.path.basename(dest))
-        os.replace(tmp, dest)
-    except UpdateError:
-        raise
-    except Exception:  # noqa: BLE001 - 任何中断都不留可被误认为成品的残留
-        _cleanup_tmp()
-        raise
-    return dest
+            # 首次进入（total 未知）而 .part 恰好等于远端长度时，上面的分支不会
+            # 触发；此时 Range 起点 == EOF 会 416。用 HEAD 语义无法便宜地拿到长度，
+            # 故在 416 时把 total 归零重来（见下方 HTTPError 处理）。
+            # 首次进入时 total 未知，无法用长度判断 .part 是否已完整。此时若直接
+            # 发 `Range: bytes=<总长>-`，真实 CDN 会回 416（实测：起始偏移等于
+            # 文件长度即 416），于是这份其实**已经完整**的数据被下面的失败分支
+            # 删掉、再反复空转。故：remaining_unknown 时先不续传，改为先验内容——
+            # 已是有效 zip 就直接转正（0 次网络请求），否则从头下。
+            if done and total <= 0 and is_valid_zip(tmp):
+                os.replace(tmp, dest)
+                return dest
+            headers = {"User-Agent": USER_AGENT}
+            if done:
+                headers["Range"] = "bytes=%d-" % done   # 续传
+            req = Request(url, headers=headers)
+            with urlopen(req, timeout=60) as resp:
+                # 206 才是真续传；服务端不支持时会回 200 并从头发，必须从头写。
+                if done and getattr(resp, "status", 200) != 206:
+                    _cleanup_tmp()
+                    done = 0
+                    mode = "wb"
+                else:
+                    mode = "ab" if done else "wb"
+                if total <= 0:
+                    total = _content_length(resp, done)
+                with open(tmp, mode) as fh:
+                    while True:
+                        chunk = resp.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        fh.write(chunk)
+                        done += len(chunk)
+                        if progress and total > 0:
+                            progress(done, total)
+            # 长度可知：字节数不符即连接被截断（或服务端声明有误），不得转正
+            if total > 0 and done != total:
+                last_err = UpdateError(
+                    "下载不完整：%s 收到 %d / %d 字节（连接中断），将从断点继续重试"
+                    % (os.path.basename(dest), done, total))
+                continue          # 保留 .part 供下次续传（不清空，避免重下 400 MB）
+            # 长度相符也必须验内容：长度对但字节被清零的坏样本真实发生过
+            # （实测：长度逐字节等于 Content-Length，中央目录完好，92.65% 是 0）。
+            # 只信长度会把这个坏文件转正成缓存，之后每次解压都 CRC 失败。
+            if not is_valid_zip(tmp):
+                last_err = UpdateError(
+                    "下载内容校验失败：%s 不是有效的 zip（可能被截断或损坏），已丢弃，请重试"
+                    % os.path.basename(dest))
+                _cleanup_tmp()    # 内容不对，留着也没法续传
+                done = 0
+                continue
+            os.replace(tmp, dest)
+            return dest
+        except Exception as exc:  # noqa: BLE001 - 网络/IO 抖动一律重试
+            last_err = exc
+            # 416：Range 起点已到/超过文件末尾，说明 .part 其实已完整（首次进入
+            # 时 total 未知，上面的 to-verify 分支漏掉了这种）。丢掉重下，
+            # 而不是反复发同一个必然失败的请求（旧实现会把重建后的 total 又设上，
+            # 陷入「删数据 → 再 416」的死循环）。
+            if getattr(exc, "code", None) == 416:
+                _cleanup_tmp()
+                done = 0
+                total = 0
+            continue
+    _cleanup_tmp()                # 重试尽数失败：不留可被误认为成品的残留
+    if isinstance(last_err, UpdateError):
+        raise last_err
+    raise UpdateError("下载失败：%s（%s）请重试"
+                      % (os.path.basename(dest), last_err))
+
+
+def _content_length(resp, already):
+    """响应声明的**总**长度；续传（206）时它是剩余长度，需加上已有字节。
+
+    取不到返回 0（调用方退回内容校验）。
+    """
+    try:
+        n = int(resp.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if n <= 0:
+        return 0
+    return n + already if getattr(resp, "status", 200) == 206 else n
 
 
 def zip_top_files(zip_path):
@@ -360,6 +433,35 @@ def remove_files(names, dest_dir):
             errors.append("%s: %s" % (name, exc))
     if errors:
         raise OSError("; ".join(errors))
+
+
+def prune_nested_subdirs(root, keep=3):
+    """对 root 下每个 tag 目录，再各保留其内部最新的 keep 个子目录。
+
+    备份真实布局是 `backup/{tag}/{时间戳}/`（GUI 按 tag 建目录、每次安装新建
+    一个时间戳子目录）。只对 backup 根做 prune 时，被保留的 tag 目录内部的
+    历史时间戳一个都不会被清——同一 tag 反复安装（失败重试 / 回滚后重装）
+    会让备份无上限增长（每次约 1.3 GB），README 承诺的「保留最近 3 个」不成立。
+
+    只删目录、绝不删文件；root 不存在返回 []；任何单个 tag 失败不影响其它。
+    """
+    if keep <= 0 or not root or not os.path.isdir(root):
+        return []
+    removed = []
+    errors = []
+    try:
+        tags = [e for e in os.scandir(root) if e.is_dir()]
+    except OSError as exc:
+        raise OSError("扫描失败 %s: %s" % (root, exc)) from exc
+    for tag in tags:
+        try:
+            for name in prune_old_subdirs(tag.path, keep=keep):
+                removed.append(os.path.join(tag.name, name))
+        except OSError as exc:  # noqa: BLE001 - 聚合后统一抛出
+            errors.append("%s: %s" % (tag.name, exc))
+    if errors:
+        raise OSError("; ".join(errors))
+    return removed
 
 
 def prune_old_subdirs(root, keep=3):

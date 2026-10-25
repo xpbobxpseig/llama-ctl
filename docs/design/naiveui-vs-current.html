@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>现状 Apple 风 vs NaiveUI 默认企业风 — 一屏对照</title>
+<style>
+  :root {
+    --page-bg: #ffffff;
+    --page-fg: #1d1d1f;
+    --page-mut: #86868b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 28px 48px;
+    background: var(--page-bg); color: var(--page-fg);
+    font-family: "Microsoft YaHei UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 700; }
+  .sub { font-size: 13px; color: var(--page-mut); margin-bottom: 18px; }
+  .toolbar { margin-bottom: 18px; display: flex; gap: 8px; }
+  .toolbar button {
+    font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 8px;
+    border: 1px solid #d2d2d7; background: #fff; color: #1d1d1f; cursor: pointer;
+  }
+  .toolbar button[aria-pressed="true"] { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+
+  .compare { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .col { width: 660px; }
+  .col h2 { font-size: 14px; margin: 0 0 8px; font-weight: 700; }
+  .col .note { font-size: 12px; color: var(--page-mut); margin-bottom: 10px; line-height: 1.5; }
+  .stage {
+    width: 660px; height: 568px; overflow: hidden;
+    border-radius: 12px; border: 1px solid #d2d2d7;
+    background: #f5f5f7;
+  }
+  .win { width: 1000px; height: 860px; transform: scale(0.66); transform-origin: top left; }
+
+  /* ---------- 左：现状 Apple 风（tokens 取自 llama_ctl_gui.py L427-504） ---------- */
+  .cur.light {
+    --BG:#f5f5f7; --CARD:#ffffff; --BORDER:#e3e3e8; --FIELD:#fafafa;
+    --TXT:#1d1d1f; --MUT:#86868b; --ACC:#0a84ff; --ACCH:#0071e3;
+    --RED:#ff3b30; --ORG:#ff9500; --GRAY:#aeaeb2; --RUN:#30d158; --STOP:#8e8e93; --TIP:#f0f0f2;
+    --RAD: 12px; --RAD_S: 8px; --FONT: "Microsoft YaHei UI", system-ui, sans-serif;
+    --MONO: "Cascadia Mono", Consolas, monospace;
+    --F_DISPLAY: 18px; --F_SECTION: 15px; --F_GROUP: 13px; --F_BODY: 13px; --F_SMALL: 12px; --F_MICRO: 11px;
+    --SHADOW: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .cur.dark {
+    --BG:#1e1e20; --CARD:#2c2c2e; --BORDER:#3a3a3c; --FIELD:#252527;
+    --TXT:#f5f5f7; --MUT:#98989d; --ACC:#0a84ff; --ACCH:#0071e3;
+    --RED:#ff453a; --ORG:#ff9f0a; --GRAY:#636366; --RUN:#30d158; --STOP:#636366; --TIP:#2c2c2e;
+    --RAD: 12px; --RAD_S: 8px; --FONT: "Microsoft YaHei UI", system-ui, sans-serif;
+    --MONO: "Cascadia Mono", Consolas, monospace;
+    --F_DISPLAY: 18px; --F_SECTION: 15px; --F_GROUP: 13px; --F_BODY: 13px; --F_SMALL: 12px; --F_MICRO: 11px;
+    --SHADOW: 0 1px 2px rgba(0,0,0,.25);
+  }
+
+  /* ---------- 右：NaiveUI 默认主题（light/dark 默认 token 近似值） ---------- */
+  .nv.light {
+    --BG:#f6f7f9; --CARD:#ffffff; --BORDER:#e0e0e6; --FIELD:#ffffff;
+    --TXT:#333639; --MUT:#808089; --ACC:#18a058; --ACCH:#36ad6a;
+    --RED:#d03050; --ORG:#f0a020; --GRAY:#c2c2c2; --RUN:#18a058; --STOP:#c2c2c2; --TIP:#ffffff;
+    --RAD: 3px; --RAD_S: 3px; --FONT: v-sans, system-ui, "Microsoft YaHei UI", sans-serif;
+    --MONO: v-mono, Consolas, monospace;
+    --F_DISPLAY: 16px; --F_SECTION: 14px; --F_GROUP: 14px; --F_BODY: 14px; --F_SMALL: 13px; --F_MICRO: 12px;
+    --SHADOW: 0 1px 3px rgba(0,0,0,.08);
+  }
+  .nv.dark {
+    --BG:#101014; --CARD:#18181c; --BORDER:#33333a; --FIELD:#26262c;
+    --TXT:#fffffff0; --MUT:#ffffffb3; --ACC:#63e2b7; --ACCH:#7fe7c4;
+    --RED:#e88080; --ORG:#f2c97d; --GRAY:#4d4d55; --RUN:#63e2b7; --STOP:#4d4d55; --TIP:#18181c;
+    --RAD: 3px; --RAD_S: 3px; --FONT: v-sans, system-ui, "Microsoft YaHei UI", sans-serif;
+    --MONO: v-mono, Consolas, monospace;
+    --F_DISPLAY: 16px; --F_SECTION: 14px; --F_GROUP: 14px; --F_BODY: 14px; --F_SMALL: 13px; --F_MICRO: 12px;
+    --SHADOW: 0 1px 3px rgba(0,0,0,.4);
+  }
+
+  /* ---------- 共用骨架 ---------- */
+  .win {
+    background: var(--BG); color: var(--TXT);
+    font-family: var(--FONT);
+    padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .topbar { display: flex; align-items: center; gap: 10px; }
+  .title { font-size: var(--F_DISPLAY); font-weight: 700; letter-spacing: .2px; }
+  .spacer { flex: 1; }
+  .sel {
+    font-size: var(--F_BODY); padding: 7px 12px; border-radius: var(--RAD_S);
+    background: var(--FIELD); color: var(--TXT); border: 1px solid var(--BORDER);
+    display: inline-flex; align-items: center; gap: 8px; min-width: 168px;
+    justify-content: space-between;
+  }
+  .btn {
+    font-size: var(--F_BODY); padding: 7px 14px; border-radius: var(--RAD_S);
+    border: 1px solid var(--BORDER); background: var(--CARD); color: var(--TXT);
+  }
+  .btn.primary { background: var(--ACC); border-color: var(--ACC); color: #fff; font-weight: 600; }
+  .btn.ghost { background: transparent; color: var(--MUT); }
+  .btn.danger { background: var(--RED); border-color: var(--RED); color: #fff; }
+
+  .card {
+    background: var(--CARD); border: 1px solid var(--BORDER); border-radius: var(--RAD);
+    box-shadow: var(--SHADOW); padding: 14px 16px;
+  }
+  .status { display: flex; align-items: center; gap: 12px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--RUN); flex: none; }
+  .dot.stopped { background: var(--STOP); }
+  .status .st { font-size: var(--F_SECTION); font-weight: 700; }
+  .status .meta { font-size: var(--F_MICRO); color: var(--MUT); font-family: var(--MONO); }
+  .cardh { font-size: var(--F_SECTION); font-weight: 700; margin: 0 0 10px; }
+
+  .group { border: 1px solid var(--BORDER); border-radius: var(--RAD); background: var(--CARD); overflow: hidden; }
+  .group + .group { margin-top: 8px; }
+  .ghead {
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+    font-size: var(--F_GROUP); font-weight: 700; background: var(--TIP);
+    border-bottom: 1px solid var(--BORDER);
+  }
+  .ghead .chev { margin-left: auto; color: var(--MUT); font-size: var(--F_SMALL); }
+  .gbody { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+
+  .row { display: grid; grid-template-columns: 200px 1fr 92px 26px; align-items: center; gap: 12px; }
+  .row .lab { font-size: var(--F_BODY); }
+  .row .val {
+    font-size: var(--F_BODY); font-family: var(--MONO); color: var(--TXT);
+    text-align: right;
+  }
+  .q {
+    width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--BORDER);
+    background: var(--FIELD); color: var(--MUT); font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* 滑块：左 CTkSlider（粗轨道+圆柄） / 右 NaiveUI（细轨道+小柄）由 .slider.cur / .slider.nv 覆盖 */
+  .slider { height: 20px; position: relative; }
+  .slider .track { position: absolute; top: 8px; left: 0; right: 0; height: 4px; border-radius: 2px; background: var(--BORDER); }
+  .slider .fill { position: absolute; top: 8px; left: 0; height: 4px; border-radius: 2px; background: var(--ACC); }
+  .slider .knob { position: absolute; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 1px solid var(--BORDER); }
+  .win.cur .slider { height: 22px; }
+  .win.cur .slider .track { top: 9px; height: 6px; border-radius: 3px; background: var(--GRAY); }
+  .win.cur .slider .fill { top: 9px; height: 6px; border-radius: 3px; background: var(--ACC); }
+  .win.cur .slider .knob { top: 5px; width: 16px; height: 16px; border-color: transparent; box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+
+  .input {
+    font-size: var(--F_BODY); padding: 6px 10px; border-radius: var(--RAD_S);
+    background: var(--FIELD); color: var(--TXT); border: 1px solid var(--BORDER);
+    height: 32px; display: flex; align-items: center;
+  }
+  .input.mono { font-family: var(--MONO); }
+  .input.mut { color: var(--MUT); }
+  .filecell { display: flex; gap: 8px; align-items: center; }
+  .filecell .input { flex: 1; }
+  .filecell .btn { padding: 6px 10px; }
+
+  .cb { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--BORDER); background: var(--FIELD); display:inline-block; vertical-align:-3px; margin-right: 8px; }
+  .cb.on { background: var(--ACC); border-color: var(--ACC); position: relative; }
+  .cb.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(40deg); }
+  .win.nv .cb { border-radius: 3px; }
+
+  .loghead { font-size: var(--F_BODY); color: var(--MUT); display: flex; align-items: center; gap: 8px; }
+  .logline { font-family: var(--MONO); font-size: var(--F_MICRO); color: var(--MUT); line-height: 1.7; }
+  .hintbar { font-size: var(--F_SMALL); color: var(--ORG); }
+
+  .legend { margin-top: 28px; max-width: 1348px; }
+  .legend h2 { font-size: 15px; margin: 0 0 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #d2d2d7; padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f7; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; background: #f0f0f2; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; border: 1px solid rgba(0,0,0,.15); }
+</style>
+</head>
+<body>
+
+<h1>一屏对照：现状 Apple 风 &nbsp;vs&nbsp; NaiveUI 默认企业风</h1>
+<div class="sub">
+左面板的配色与字阶<b>逐项取自源码实测值</b>（<code>llama_ctl_gui.py</code> L427–440 主题 token、L494–504 字体 token），窗口按 1000×860 缩放到 66%。
+右面板为 NaiveUI 默认主题 token 的近似复现（圆角 3px、主色 light <code>#18a058</code> / dark <code>#63e2b7</code>、14px 基准字号）。
+两者内容、控件、文案完全一致 —— 差异只来自设计语言。
+</div>
+
+<div class="toolbar">
+  <button id="t-light" aria-pressed="true">浅色</button>
+  <button id="t-dark" aria-pressed="false">深色</button>
+</div>
+
+<div class="compare">
+  <div class="col">
+    <h2>现状：CustomTkinter 手工 Apple 风</h2>
+    <div class="note">圆角 12/8px · 主色 <span class="sw" style="background:#0a84ff"></span>#0a84ff · 字阶 18/15/13/13/12/11 · 微软雅黑 UI</div>
+    <div class="stage"><div class="win cur light" id="win-cur">
+      <div class="topbar">
+        <div class="title">llama.cpp 服务控制台</div>
+        <div class="spacer"></div>
+        <div class="sel"><span>QwenLLM</span><span>▾</span></div>
+        <div class="btn">停止</div>
+        <div class="btn">重启</div>
+        <div class="btn ghost">还原</div>
+        <div class="btn primary">应用更改</div>
+        <div class="btn ghost">⚙ 设置</div>
+      </div>
+
+      <div class="card status">
+        <div class="dot"></div>
+        <div>
+          <div class="st">RUNNING</div>
+          <div class="meta">healthz ok · 127.0.0.1:8080 · b5527</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="logline">uptime 3d 04:12 · ctx 131072 · ngl 999</div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">模型与视觉<span class="chev">▾</span></div>
+        <div class="gbody">
+          <div class="row">
+            <div class="lab">模型文件</div>
+            <div class="filecell"><div class="input mono">F:\models\Qwen3-32B-Q4_K_M.gguf</div><div class="btn">浏览</div></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">视觉投影</div>
+            <div class="filecell"><div class="input mono mut">（未设置）</div><div class="btn">浏览</div></div>
+            <div></div><div class="q">?</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">加速<span class="chev">▾</span></div>
+        <div class="gbody">
+          <div class="row">
+            <div class="lab">GPU 层数</div>
+            <div class="slider"><div class="track"></div><div class="fill" style="width:100%"></div><div class="knob" style="left:calc(100% - 8px)"></div></div>
+            <div class="val">999</div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">投机解码</div>
+            <div class="sel" style="width:auto"><span>关闭</span><span>▾</span></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">Flash Attention</div>
+            <div class="sel" style="width:auto"><span>开启</span><span>▾</span></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">KV cache 类型</div>
+            <div class="sel" style="width:auto"><span>q8_0</span><span>▾</span></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab"></div>
+            <div><span class="cb"></span>禁用 mmap</div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab"></div>
+            <div><span class="cb on"></span>锁定内存</div>
+            <div></div><div class="q">?</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">上下文与显存<span class="chev">›</span></div>
+      </div>
+      <div class="group">
+        <div class="ghead">并发与吞吐<span class="chev">›</span></div>
+      </div>
+      <div class="group">
+        <div class="ghead">采样<span class="chev">›</span></div>
+      </div>
+
+      <div class="card" style="margin-top:auto">
+        <div class="loghead">日志尾随 server.err（已折叠）</div>
+      </div>
+      <div class="hintbar">有未应用更改 · 上下文长度 131072 → 65536</div>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <h2>NaiveUI 默认企业风</h2>
+    <div class="note">圆角 3px · 主色 <span class="sw" style="background:#18a058"></span>#18a058（深 <span class="sw" style="background:#63e2b7"></span>#63e2b7）· 字阶 16/14/14/14/13/12 · v-sans</div>
+    <div class="stage"><div class="win nv light" id="win-nv">
+      <div class="topbar">
+        <div class="title">llama.cpp 服务控制台</div>
+        <div class="spacer"></div>
+        <div class="sel"><span>QwenLLM</span><span>▾</span></div>
+        <div class="btn">停止</div>
+        <div class="btn">重启</div>
+        <div class="btn ghost">还原</div>
+        <div class="btn primary">应用更改</div>
+        <div class="btn ghost">⚙ 设置</div>
+      </div>
+
+      <div class="card status">
+        <div class="dot"></div>
+        <div>
+          <div class="st">RUNNING</div>
+          <div class="meta">healthz ok · 127.0.0.1:8080 · b5527</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="logline">uptime 3d 04:12 · ctx 131072 · ngl 999</div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">模型与视觉<span class="chev">▾</span></div>
+        <div class="gbody">
+          <div class="row">
+            <div class="lab">模型文件</div>
+            <div class="filecell"><div class="input mono">F:\models\Qwen3-32B-Q4_K_M.gguf</div><div class="btn">浏览</div></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">视觉投影</div>
+            <div class="filecell"><div class="input mono mut">（未设置）</div><div class="btn">浏览</div></div>
+            <div></div><div class="q">?</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">加速<span class="chev">▾</span></div>
+        <div class="gbody">
+          <div class="row">
+            <div class="lab">GPU 层数</div>
+            <div class="slider"><div class="track"></div><div class="fill" style="width:100%"></div><div class="knob" style="left:calc(100% - 8px)"></div></div>
+            <div class="val">999</div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">投机解码</div>
+            <div class="sel" style="width:auto"><span>关闭</span><span>▾</span></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">Flash Attention</div>
+            <div class="sel" style="width:auto"><span>开启</span><span>▾</span></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab">KV cache 类型</div>
+            <div class="sel" style="width:auto"><span>q8_0</span><span>▾</span></div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab"></div>
+            <div><span class="cb"></span>禁用 mmap</div>
+            <div></div><div class="q">?</div>
+          </div>
+          <div class="row">
+            <div class="lab"></div>
+            <div><span class="cb on"></span>锁定内存</div>
+            <div></div><div class="q">?</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">上下文与显存<span class="chev">›</span></div>
+      </div>
+      <div class="group">
+        <div class="ghead">并发与吞吐<span class="chev">›</span></div>
+      </div>
+      <div class="group">
+        <div class="ghead">采样<span class="chev">›</span></div>
+      </div>
+
+      <div class="card" style="margin-top:auto">
+        <div class="loghead">日志尾随 server.err（已折叠）</div>
+      </div>
+      <div class="hintbar">有未应用更改 · 上下文长度 131072 → 65536</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="legend">
+  <h2>肉眼可见的差异点</h2>
+  <table>
+    <tr><th style="width:150px">维度</th><th style="width:50%">现状</th><th>NaiveUI 默认</th></tr>
+    <tr><td>圆角</td><td>卡片 12px / 控件 8px，明显圆润</td><td>统一 3px，方正、企业后台观感</td></tr>
+    <tr><td>主色</td><td><span class="sw" style="background:#0a84ff"></span>#0a84ff 蓝（Apple 系统蓝）</td><td><span class="sw" style="background:#18a058"></span>#18a058 绿 / 深色下 <span class="sw" style="background:#63e2b7"></span>#63e2b7 薄荷绿</td></tr>
+    <tr><td>字阶</td><td>六级严格递减 18/15/13/13/12/11，有 <code>test_font_tokens.py</code> 守护</td><td>库内默认 16/14/14/14/13/12，层级压缩（section=group=body=14）</td></tr>
+    <tr><td>字体</td><td>微软雅黑 UI + Cascadia Mono（数值/日志）</td><td>v-sans（system-ui 栈）+ v-mono</td></tr>
+    <tr><td>滑块</td><td>6px 轨道 + 16px 圆柄（CTkSlider）</td><td>4px 轨道 + 14px 柄，更细</td></tr>
+    <tr><td>卡片分隔</td><td>浅灰底 + 1px 描边 + 极淡投影</td><td>同构，但圆角与色温不同，整体更「扁平」</td></tr>
+    <tr><td>状态圆点</td><td>#30d158 绿 + 呼吸动效（30s 无交互静止）</td><td>默认无动效，需自行实现</td></tr>
+    <tr><td>「?」提示框</td><td>300ms 触发 / 200ms 淡入 / 0.8s 指数渐隐（<code>motion.py</code> 手写）</td><td>n-popover，默认瞬时显隐，渐隐曲线需自配</td></tr>
+  </table>
+  <p style="font-size:13px;color:#86868b;line-height:1.6">
+  注：右面板是<b>默认主题</b>。NaiveUI 支持全局主题覆盖（primary color / borderRadius / 字号），
+  要逼近左面板需自写 themeOverrides —— 那时「用 NaiveUI 省事」的收益会打折，但「省掉自绘组件」的收益仍在。
+  </p>
+</div>
+
+<script>
+  var bl = document.getElementById('t-light'), bd = document.getElementById('t-dark');
+  function setTheme(dark) {
+    var w = ['win-cur', 'win-nv'].map(function(id){ return document.getElementById(id); });
+    w.forEach(function(el, i) {
+      el.className = 'win ' + (i === 0 ? 'cur' : 'nv') + ' ' + (dark ? 'dark' : 'light');
+    });
+    bl.setAttribute('aria-pressed', String(!dark));
+    bd.setAttribute('aria-pressed', String(dark));
+  }
+  bl.onclick = function(){ setTheme(false); };
+  bd.onclick = function(){ setTheme(true); };
+</script>
+</body>
+</html>

@@ -1,69 +1,68 @@
-﻿import * as motion from './src/motion/index.js'
 /**
  * Smoke entry — bundled and run inside jsdom by `smoke.mjs`.
  *
- * It mounts the real app the way `main.js` does and hangs the pieces the
- * assertions need off `window`. Everything the checks touch lives here so
+ * It mounts the real app the way `main.js` does — `createApp(DesignApp)` plus
+ * the global stylesheet, no query switch — and hangs every piece the
+ * assertions need off `window`. Everything the checks touch lives here, so
  * `smoke.mjs` stays pure Node: no bundling in the assertion pass, and no
  * second build for the verifier to drift from.
- *
- * Tickets 12/13/14/15 each added what they assert on; the object below is the
- * union, so one bundle serves every ticket's checks.
  */
 import { createApp } from 'vue'
-// `main.js` imports this before mounting; the smoke bundle must do the same, or
-// it runs without the app's own stylesheet.
+// `main.js` imports this before mounting; the smoke bundle must do the same,
+// or it runs without the app's own stylesheet.
 import './src/styles/global.css'
-import App from './src/App.vue'
+import DesignApp from './src/design/DesignApp.vue'
+import ParamsView from './src/design/ParamsView.vue'
+import LogsView from './src/design/LogsView.vue'
+import PresetsView from './src/design/PresetsView.vue'
+import SettingsView from './src/design/SettingsView.vue'
+import AboutView from './src/design/AboutView.vue'
+import { C as COPY, t, autoBackupName } from './src/design/copy.js'
+import * as font from './src/design/font.js'
 import * as store from './src/stores/snapshot.js'
 import * as theme from './src/stores/theme.js'
-import { naiveOverrides, cssVars, TYPE, RADIUS, PALETTES } from './src/theme/index.js'
-import { parseGeometry, formatGeometry } from './src/window/geometry.js'
-// Ticket 13.
-import { FIELDS, GROUP_ORDER, OPTIONS, paramHelp, optionHelp } from './src/api/field-copy.js'
-import ParamForm from './src/components/ParamForm.vue'
-// Ticket 14: the control bar, the breathing dot and the log tail.
-import ServiceControls from './src/components/ServiceControls.vue'
-import StatusDot from './src/components/StatusDot.vue'
-import LogTail from './src/components/LogTail.vue'
-import ConfirmDialog from './src/components/ConfirmDialog.vue'
-import { CONTROL_COPY, ct } from './src/components/control-copy.js'
-// Ticket 15: the update section, the release notes and the streamed progress.
-import UpdateSection from './src/components/UpdateSection.vue'
-import ReleaseNotes from './src/components/ReleaseNotes.vue'
-import UpdateProgress from './src/components/UpdateProgress.vue'
-import { UPDATE_COPY, ut } from './src/components/update-copy.js'
 import * as update from './src/stores/update.js'
-import { demoUpdateCheck } from './src/api/fixture.js'
-import { EVENT_UPDATE } from './src/api/ipc.js'
-// Ticket 17: presets, Apply / Revert and the switch guard.
-import PresetBar from './src/components/PresetBar.vue'
-import ParamDiff from './src/components/ParamDiff.vue'
-import GuardDialog, { askGuard, closeGuard } from './src/components/GuardDialog.vue'
-import { SUBMIT_COPY, pt, autoBackupName } from './src/components/submit-copy.js'
+import * as ipc from './src/api/ipc.js'
+import { demoSnapshot, demoUpdateCheck, emptySnapshot } from './src/api/fixture.js'
+import {
+  FIELDS,
+  GROUP_ORDER,
+  GROUP_LABEL,
+  OPTIONS,
+  PATH_FIELDS,
+  NO_HELP,
+  paramHelp,
+  optionHelp,
+} from './src/api/field-copy.js'
+import { TYPE, RADIUS, SPACE, PALETTES, cssVars, resolveMode } from './src/theme/index.js'
+import { parseGeometry, formatGeometry } from './src/window/geometry.js'
+import * as motion from './src/motion/index.js'
 
 // ---- a recording IPC double ------------------------------------------------
 /**
  * jsdom has no Rust behind it, so `invoke` would reject and every command the
- * update flow sends would fail. This double stands in for the shell.
+ * shell sends would fail. This double stands in for it.
  *
  * It is a **double**, not a reimplementation: it answers in the envelope's own
- * shape (`{ok, data}` / `{ok, error}`) and only for the commands a check needs.
- * Three things it deliberately does the way Rust does them:
+ * shape (`{ok, data}` / `{ok, error}`), records every call (that is what the
+ * IPC-shape assertions read), and only knows the commands a check needs. Four
+ * things it deliberately does the way Rust does them:
  *
  *   - `save_settings` answers with a **fresh Snapshot**, so a preference is
- *     only "saved" once Rust has read it back — which is the whole point of the
- *     round trip the settings page makes;
+ *     only "saved" once Rust has read it back;
+ *   - `apply_changes` answers with `{ snapshot }` — the value the shell folds
+ *     in and clears its form against;
  *   - `install_update` runs **slowly** and emits one line per step on the real
  *     `EVENT_UPDATE` name, through the real `listen` path, so the streaming
  *     render is what is being tested and not a shortcut;
- *   - every call is recorded, which is what "persists through save_settings"
- *     and "asks before doing anything" are asserted against.
+ *   - an unknown command fails loudly instead of pretending to succeed.
  *
  * It is installed *after* the store module has been evaluated, so `isTauri()`
- * has already settled on demo mode and the shell keeps saying so on screen.
+ * has already settled on demo mode and the fixture is what boots; from that
+ * point on `isTauri()` is true, which is what lets the startup auto-check and
+ * the progress listeners take their real paths.
  */
-const ipc = {
+const ipcDouble = {
   /** @type {{cmd:string,args:object}[]} every command, in order. */
   calls: [],
   /** event name → [{ id, cb }] */
@@ -75,7 +74,7 @@ const ipc = {
 
 /** Call every listener of `event`, the way the shell emits a payload. */
 function emit(event, payload) {
-  for (const l of ipc.listeners.get(event) ?? []) l.cb({ payload })
+  for (const l of ipcDouble.listeners.get(event) ?? []) l.cb({ payload })
 }
 
 /** The lines one install streams, in order — the real step sequence. */
@@ -91,42 +90,83 @@ const INSTALL_LINES = [
   '更新完成：QwenLLM 已重启，当前 b10819。',
 ]
 
+const ok = (data) => Promise.resolve({ ok: true, data })
+
+/** The Snapshot Rust would be holding right now. */
+const snap = () => store.snapshot.snap ?? demoSnapshot()
+
 function handle(cmd, args) {
   switch (cmd) {
     case 'plugin:event|listen': {
       const id = args.handler
-      const list = ipc.listeners.get(args.event) ?? []
-      list.push({ id, cb: ipc.cbs.get(id) })
-      ipc.listeners.set(args.event, list)
+      const list = ipcDouble.listeners.get(args.event) ?? []
+      list.push({ id, cb: ipcDouble.cbs.get(id) })
+      ipcDouble.listeners.set(args.event, list)
       return Promise.resolve(id)
     }
     case 'plugin:event|unlisten': {
-      for (const [event, list] of ipc.listeners) {
-        ipc.listeners.set(
+      for (const [event, list] of ipcDouble.listeners) {
+        ipcDouble.listeners.set(
           event,
           list.filter((l) => l.id !== args.eventId),
         )
       }
       return Promise.resolve(null)
     }
-    case 'save_settings': {
+    // 窗口材质对齐（DesignApp 的 watcher）：真机走窗口 API，替身只记录。
+    case 'plugin:window|set_theme':
+    case 'plugin:window|set_effects':
+      return Promise.resolve(null)
+    case 'save_settings':
       // Rust re-reads and returns the whole Snapshot; a language change comes
       // back with the new string table. The fixture carries one table, so only
       // `lang` moves — which is still what proves the answer was applied.
-      const snap = store.snapshot.snap
-      return Promise.resolve({
-        ok: true,
-        data: { ...snap, settings: args.settings, lang: args.settings.language },
+      return ok({
+        ...snap(),
+        settings: args.settings,
+        lang: args.settings.language ?? snap().lang,
+      })
+    // The mutating commands all answer with a Snapshot, which is what makes
+    // "the interface only ever shows what Rust read back" observable.
+    case 'get_snapshot':
+      return ok(snap())
+    case 'service_action':
+      return ok(snap())
+    case 'revert':
+      return ok(snap())
+    case 'restart':
+      return ok(snap())
+    case 'switch_service':
+      return ok({ ...snap(), selected: args.service })
+    case 'load_preset':
+      return ok({ ...snap(), preset_loaded: args.name })
+    case 'set_start_mode':
+      return ok({ ...snap(), facts: { ...snap().facts, start: args.mode } })
+    case 'apply_changes': {
+      // Rust rebuilds AppParameters from the submitted form and answers with
+      // the Snapshot it re-read. The values below are the form's, so a check
+      // can tell "the answer was folded in" from "the local buffer was kept".
+      const now = snap()
+      return ok({
+        snapshot: {
+          ...now,
+          values: { ...now.values, ...args.values },
+          facts: { ...now.facts, dirty: false },
+        },
       })
     }
+    case 'save_preset':
+      return ok({ saved: true, name: args.name })
+    case 'delete_preset':
+      return ok({ deleted: true, name: args.name })
     case 'check_update':
-      return Promise.resolve({ ok: true, data: demoUpdateCheck() })
+      return ok(demoUpdateCheck())
     case 'install_update':
       return new Promise((resolve) => {
         let i = 0
         const step = () => {
           if (i < INSTALL_LINES.length) {
-            emit(EVENT_UPDATE, INSTALL_LINES[i])
+            emit(ipc.EVENT_UPDATE, INSTALL_LINES[i])
             i += 1
             setTimeout(step, 0)
             return
@@ -154,15 +194,15 @@ function handle(cmd, args) {
 
 window.__TAURI_INTERNALS__ = {
   transformCallback(cb) {
-    const id = ipc.nextId++
-    ipc.cbs.set(id, cb)
+    const id = ipcDouble.nextId++
+    ipcDouble.cbs.set(id, cb)
     return id
   },
   unregisterCallback(id) {
-    ipc.cbs.delete(id)
+    ipcDouble.cbs.delete(id)
   },
   invoke(cmd, args) {
-    ipc.calls.push({ cmd, args })
+    ipcDouble.calls.push({ cmd, args })
     return handle(cmd, args)
   },
 }
@@ -170,56 +210,52 @@ window.__TAURI_INTERNALS__ = {
 // `_unlisten` reaches into this before invoking `plugin:event|unlisten`.
 window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} }
 
+// `main.js` applies the saved font preferences before mounting; the smoke boot
+// mirrors that order so the first frame is the one being asserted on.
+font.applySaved()
 
-
-const app = createApp(App)
+const app = createApp(DesignApp)
 app.mount('#app')
 
 window.__SMOKE__ = {
   app,
   store,
   theme,
-  naiveOverrides,
-  cssVars,
-  TYPE,
-  RADIUS,
-  PALETTES,
-  parseGeometry,
-  formatGeometry,
-  // Ticket 13.
+  update,
+  ipc,
+  ipcDouble,
+  demoSnapshot,
+  demoUpdateCheck,
+  emptySnapshot,
+  EVENT_UPDATE: ipc.EVENT_UPDATE,
+  EVENT_RESTART: ipc.EVENT_RESTART,
+  INSTALL_LINES,
+  // The design layer, as mounted.
+  DesignApp,
+  ParamsView,
+  LogsView,
+  PresetsView,
+  SettingsView,
+  AboutView,
+  copy: { C: COPY, t, autoBackupName },
+  font,
+  // Field metadata the parameter form is built from.
   FIELDS,
   GROUP_ORDER,
+  GROUP_LABEL,
   OPTIONS,
+  PATH_FIELDS,
+  NO_HELP,
   paramHelp,
   optionHelp,
-  ParamForm,
-  // Ticket 14.
-  ServiceControls,
-  StatusDot,
-  LogTail,
-  ConfirmDialog,
-  CONTROL_COPY,
-  ct,
-  // Ticket 15.
-  UpdateSection,
-  ReleaseNotes,
-  UpdateProgress,
-  UPDATE_COPY,
-  ut,
-  update,
-  demoUpdateCheck,
-  EVENT_UPDATE,
-  INSTALL_LINES,
-  // Ticket 17.
-  PresetBar,
-  ParamDiff,
-  GuardDialog,
-  askGuard,
-  closeGuard,
-  SUBMIT_COPY,
-  pt,
-  autoBackupName,
-  ipc,
-  ipc,
+  // Tokens and window geometry.
+  TYPE,
+  RADIUS,
+  SPACE,
+  PALETTES,
+  cssVars,
+  resolveMode,
+  parseGeometry,
+  formatGeometry,
   motion,
 }

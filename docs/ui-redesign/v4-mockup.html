@@ -1,0 +1,1410 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>llama-ctl · UI v4 视觉稿（石墨控制台）</title>
+<style>
+/* ─────────────────────────────────────────────────────────────────────────────
+   llama-ctl UI v4 · 静态视觉稿
+   令牌与尺寸来自 docs/ui-redesign-v4.md §2 / §4 / §6。
+   本文件只是视觉稿：无框架、无远程资源、不参与应用构建。
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --font-head: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  --r-chip: 4px; --r-ctl: 6px; --r-panel: 10px; --r-sheet: 12px;
+  --sp1: 4px; --sp2: 6px; --sp3: 8px; --sp4: 12px; --sp5: 16px; --sp6: 20px; --sp7: 24px; --sp8: 32px;
+  --ease: cubic-bezier(.2,.8,.2,1);
+  --ease-out: cubic-bezier(.4,0,1,1);
+  --stage: #08080a;
+  --stage-text: #b9b9b2;
+}
+
+html[data-theme="dark"] {
+  --bg: #0E0E0D; --surface: #161615; --field: #1E1E1C; --hover: #1D1D1B; --selected: #1A2130;
+  --border: #2A2A27; --border-strong: #3E3E39; --ctl: #6A6A63;
+  --text: #ECECE8; --text2: #B7B7B0; --muted: #8C8C84;
+  --accent: #7CA5FF; --accent-soft: #1A2338;
+  --run: #5FD08C; --run-soft: #14261B;
+  --warn: #E7B567; --warn-soft: #2E2415;
+  --err: #F08C80; --err-soft: #2A1715;
+  --add: #7ADFA0; --add-soft: #12261A;
+  --del: #F0A79E; --del-soft: #2A1715;
+  --code: #121211;
+  --fill: #ECECE8; --fill-on: #0E0E0D;
+  --ring: rgba(124,165,255,.40);
+  --shadow-pop: 0 12px 32px rgba(0,0,0,.55);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,.65);
+  --shadow-app: 0 40px 120px rgba(0,0,0,.70);
+}
+
+html[data-theme="light"] {
+  --bg: #F4F4F1; --surface: #FFFFFF; --field: #F0F0EC; --hover: #F4F4F0; --selected: #EEF2FC;
+  --border: #E4E4DF; --border-strong: #CFCFC8; --ctl: #8E8E86;
+  --text: #141413; --text2: #4C4C48; --muted: #6E6E67;
+  --accent: #2A5FE0; --accent-soft: #E8EEFC;
+  --run: #1F7A46; --run-soft: #E8F5EC;
+  --warn: #9A5B00; --warn-soft: #FBF1E2;
+  --err: #B3261E; --err-soft: #FCEDEB;
+  --add: #17663C; --add-soft: #EAF6EE;
+  --del: #A32A20; --del-soft: #FBEBE9;
+  --code: #FAFAF8;
+  --fill: #141413; --fill-on: #FFFFFF;
+  --ring: rgba(42,95,224,.35);
+  --shadow-pop: 0 12px 32px rgba(20,20,19,.16);
+  --shadow-modal: 0 24px 64px rgba(20,20,19,.22);
+  --shadow-app: 0 40px 110px rgba(20,20,19,.28);
+  --stage: #E8E8E3;
+  --stage-text: #55554F;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--stage-text);
+  background: var(--stage);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ── 页面外壳（评审用，不属于设计稿本体） ─────────────────────────────────── */
+.page { min-height: 100%; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px 24px 96px; }
+.masthead { width: 100%; max-width: 1120px; display: flex; align-items: baseline; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.masthead h1 { margin: 0; font-family: var(--font-head); font-size: 17px; font-weight: 600; letter-spacing: -.01em; color: var(--text); }
+.masthead h1 span { font-weight: 400; color: var(--muted); }
+.masthead p { margin: 0; font-size: 12px; color: var(--muted); }
+.screenlabel { max-width: 1120px; width: 100%; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.screenlabel b { font-weight: 500; color: var(--text2); }
+.screenlabel .sep { opacity: .5; }
+
+.controls {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;
+  padding: 8px; border-radius: 12px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: var(--shadow-modal); backdrop-filter: blur(12px); z-index: 90;
+}
+.controls .grp { display: flex; align-items: center; gap: 2px; padding: 0 6px; border-left: 1px solid var(--border); }
+.controls .grp:first-child { border-left: 0; padding-left: 0; }
+.controls .lbl { font-size: 11px; color: var(--muted); margin-right: 6px; letter-spacing: .02em; }
+.seg { height: 26px; padding: 0 9px; border-radius: 6px; font-size: 12px; color: var(--text2); border: 1px solid transparent; }
+.seg:hover { background: var(--hover); color: var(--text); }
+.seg[aria-pressed="true"] { background: var(--selected); color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, transparent); font-weight: 500; }
+
+/* ── 应用外壳 ─────────────────────────────────────────────────────────────── */
+.app {
+  position: relative; display: flex; flex-direction: column; flex: none;
+  width: 1080px; height: 820px;
+  --sb: 236px; --hdr: 56px; --tabh: 38px; --pad: 24px; --lbl: 160px; --toc: 160px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  box-shadow: var(--shadow-app);
+}
+.app[data-w="880"] { width: 880px; height: 640px; --sb: 180px; --hdr: 48px; --tabh: 34px; --pad: 16px; --lbl: 140px; --toc: 0px; }
+.app[data-w="880"] .toc { display: none; }
+.app[data-w="880"] .wsh { padding: 3px var(--pad); }
+.app[data-w="880"] .wsh-id { gap: 0; }
+.app[data-w="880"] .wsh-name { line-height: 1.25; }
+
+/* App bar */
+.appbar { flex: none; height: 36px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 0 10px; border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mark { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; background: var(--fill); color: var(--fill-on); flex: none; }
+.mark svg { display: block; }
+.brandname { font-size: 13px; font-weight: 600; letter-spacing: -.005em; }
+.cmdtrig { justify-self: start; display: flex; align-items: center; gap: 6px; height: 24px; min-width: 220px; padding: 0 6px 0 8px; border-radius: 6px; background: var(--field); color: var(--muted); font-size: 12px; border: 1px solid transparent; }
+.cmdtrig:hover { border-color: var(--ctl); color: var(--text2); }
+.cmdtrig .k { margin-left: auto; }
+.appbar-right { display: flex; align-items: center; gap: 6px; }
+.demochip { height: 22px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: var(--r-chip); border: 1px dashed var(--border-strong); color: var(--muted); font-size: 11px; }
+.demochip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); }
+.iconbtn { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); }
+.iconbtn:hover { background: var(--hover); color: var(--text); }
+
+/* Body split */
+.body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: var(--sb) minmax(0, 1fr); }
+
+/* Sidebar */
+.sidebar { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+.sbhead { flex: none; height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 12px; color: var(--text2); font-size: 12px; font-weight: 500; }
+.sbhead .cnt { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.sblist { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 8px 8px; display: flex; flex-direction: column; gap: 1px; }
+.svc { position: relative; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border-radius: 6px; color: var(--text2); font-size: 13px; text-align: left; }
+.svc:hover { background: var(--hover); color: var(--text); }
+.svc[aria-current="true"] { background: var(--selected); color: var(--text); font-weight: 600; }
+.svc[aria-current="true"]::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: var(--accent); }
+.svc .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text2); }
+.dot.run { background: var(--run); }
+.dot.warn { background: var(--warn); }
+.dot.unk { background: var(--muted); }
+.sbfoot { flex: none; padding: 8px; border-top: 1px solid var(--border); }
+.updchip { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+.updchip .nm { margin-left: auto; font-family: var(--font-mono); font-size: 11px; }
+
+/* Workspace */
+.workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); }
+.wsh { flex: none; height: var(--hdr); padding: 6px var(--pad); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); }
+.wsh-id { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.wsh-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wsh-name { font-family: var(--font-head); font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.truth { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: var(--muted); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.truth .sep { opacity: .55; }
+.truth b { font-weight: 400; color: var(--text2); }
+.wsh-actions { display: flex; align-items: center; gap: 6px; }
+.statechip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 7px; border-radius: var(--r-chip); font-size: 12px; font-weight: 500; background: var(--run-soft); color: var(--run); margin-right: 4px; }
+.statechip.warn { background: var(--warn-soft); color: var(--warn); }
+.statechip.idle { background: var(--field); color: var(--text2); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-ctl); border: 1px solid var(--ctl); background: transparent; color: var(--text2); font-size: 13px; white-space: nowrap; transition: background-color 90ms var(--ease), color 90ms var(--ease), border-color 90ms var(--ease); }
+.btn:hover { background: var(--hover); color: var(--text); }
+.btn.filled { height: 32px; padding: 0 14px; background: var(--fill); color: var(--fill-on); border-color: transparent; font-weight: 500; }
+.btn.filled:hover { background: color-mix(in srgb, var(--fill) 88%, var(--surface)); color: var(--fill-on); }
+.btn.text { border-color: transparent; padding: 0 6px; color: var(--text2); }
+.btn.text:hover { background: transparent; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.btn.danger { color: var(--err); }
+.btn.danger:hover { background: var(--err-soft); color: var(--err); border-color: transparent; }
+.btn[disabled] { background: var(--field); color: var(--muted); border-color: transparent; }
+.kbd { display: inline-flex; align-items: center; justify-content: center; height: 18px; min-width: 18px; padding: 0 4px; border: 1px solid var(--border); border-radius: var(--r-chip); background: var(--field); color: var(--muted); font-family: var(--font-mono); font-size: 11px; letter-spacing: .02em; line-height: 1; }
+
+/* Tabs */
+.tabs { flex: none; height: var(--tabh); display: flex; align-items: stretch; gap: 4px; padding: 0 var(--pad); border-bottom: 1px solid var(--border); }
+.tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; color: var(--text2); font-size: 13px; font-weight: 500; }
+.tab + .tab { margin-left: 18px; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); }
+.tab[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+.tab .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; background: var(--warn-soft); color: var(--warn); }
+.tab .badge[hidden] { display: none; }
+
+/* Banner */
+.banner { flex: none; display: none; align-items: flex-start; gap: 8px; margin: 0 var(--pad); margin-top: 10px; padding: 8px 10px; border-radius: 0 6px 6px 0; border-left: 2px solid var(--err); background: var(--err-soft); color: var(--err); font-size: 12px; }
+.banner.show { display: flex; }
+.banner .bodyline { min-width: 0; }
+.banner .rowline { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+
+/* Pane + toolbar */
+.pane { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.pane::-webkit-scrollbar { width: 10px; }
+.pane::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+.toolbar { position: sticky; top: 0; z-index: 6; height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 var(--pad); background: var(--surface); border-bottom: 1px solid var(--border); }
+.search { display: flex; align-items: center; gap: 6px; height: 28px; flex: 0 1 240px; min-width: 140px; padding: 0 6px 0 8px; border-radius: 6px; background: var(--field); border: 1px solid var(--ctl); color: var(--muted); }
+.search input { flex: 1 1 auto; min-width: 0; border: 0; background: none; outline: none; font-size: 13px; color: var(--text); }
+.search input::placeholder { color: var(--text2); opacity: .6; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 6px; border: 1px solid transparent; color: var(--text2); font-size: 12px; }
+.toggle:hover { background: var(--hover); color: var(--text); }
+.toggle .box { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--ctl); }
+.toggle[aria-pressed="true"] { background: var(--selected); color: var(--text); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.toggle[aria-pressed="true"] .box { background: var(--accent); border-color: var(--accent); }
+.spacer { flex: 1 1 auto; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; border-radius: var(--r-chip); background: var(--field); color: var(--text2); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* Form */
+.formwrap { display: grid; grid-template-columns: var(--toc) minmax(0, 1fr); gap: var(--sp7); padding: 12px var(--pad) 28px; }
+.app[data-w="880"] .formwrap { grid-template-columns: minmax(0, 1fr); }
+.toc { position: sticky; top: 64px; align-self: start; padding-top: 26px; display: flex; flex-direction: column; gap: 1px; }
+.toc a { position: relative; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; border-radius: 5px; color: var(--text2); font-size: 12px; text-decoration: none; }
+.toc a:hover { background: var(--hover); color: var(--text); }
+.toc a.active { color: var(--accent); background: var(--accent-soft); font-weight: 500; }
+.toc a .n { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.toc a .chg { color: var(--warn); font-size: 11px; }
+
+.sec { scroll-margin-top: 56px; }
+.sechead { position: sticky; top: 48px; z-index: 3; height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 2px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.sechead h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.sechead .n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sechead .chg { margin-left: auto; font-size: 11px; color: var(--warn); font-variant-numeric: tabular-nums; }
+.rows { padding: 4px 0 20px; }
+
+.row { position: relative; display: grid; grid-template-columns: 18px var(--lbl) minmax(0, 1fr) 24px; align-items: center; gap: 12px; min-height: 44px; padding: 4px 8px; margin: 0 -8px; border-radius: 6px; }
+.row:hover { background: var(--hover); }
+.row.changed::before { content: ""; position: absolute; left: -2px; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
+.help { position: relative; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--ctl); color: var(--muted); font-size: 11px; line-height: 1; cursor: help; }
+.help::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; }
+.help:hover { color: var(--accent); border-color: var(--accent); }
+.lbl { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lbl .nm { font-size: 13px; font-weight: 500; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row:hover .lbl .nm, .row.changed .lbl .nm { color: var(--text); }
+.row.changed .lbl .nm { font-weight: 600; }
+.lbl .fl { font-family: var(--font-mono); font-size: 11px; line-height: 1.3; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctlwrap { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.org { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.gutter { display: flex; align-items: center; justify-content: center; }
+.resetbtn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; color: var(--muted); opacity: 0; transition: opacity 90ms var(--ease), color 90ms var(--ease); }
+.row:hover .resetbtn, .row.changed .resetbtn, .resetbtn:focus-visible { opacity: 1; }
+.resetbtn:hover { color: var(--accent); background: var(--surface); }
+
+/* numeric */
+.num { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.rail { position: relative; flex: 1 1 auto; min-width: 48px; height: 4px; border-radius: 999px; background: var(--border-strong); }
+.rail .fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--accent); }
+.rail .thumb { position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px; transform: translateY(-50%); border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
+.rail .svcmark { position: absolute; top: -4px; height: 12px; width: 2px; background: var(--text2); opacity: .55; border-radius: 1px; }
+.numbox { position: relative; flex: none; }
+.numbox input { width: 96px; height: 28px; padding: 0 30px 0 8px; border-radius: 6px; border: 1px solid var(--ctl); background: var(--field); color: var(--text); font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.numbox input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.numbox .unit { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); pointer-events: none; }
+
+/* text / path / select / check */
+.tinput { width: 100%; max-width: 420px; height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--ctl); background: var(--field); color: var(--text); font-size: 13px; }
+.tinput.mono { font-family: var(--font-mono); }
+.tinput:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.path { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.path .tinput { flex: 1 1 auto; min-width: 0; }
+.path .btn { height: 28px; padding: 0 8px; flex: none; }
+.selwrap { position: relative; width: 100%; max-width: 240px; }
+.selwrap::after { content: ""; position: absolute; right: 10px; top: 50%; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: translateY(-70%) rotate(45deg); pointer-events: none; }
+.sel { width: 100%; height: 28px; padding: 0 26px 0 8px; border-radius: 6px; border: 1px solid var(--ctl); background: var(--field); color: var(--text); font-size: 13px; appearance: none; -webkit-appearance: none; }
+.sel:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); }
+.check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.check .box { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--ctl); background: var(--field); display: grid; place-items: center; }
+.check input:checked + .box { background: var(--accent); border-color: var(--accent); }
+.check input:checked + .box::after { content: ""; width: 7px; height: 4px; border-left: 1.7px solid #fff; border-bottom: 1.7px solid #fff; transform: translateY(-1px) rotate(-45deg); }
+.check input:focus-visible + .box { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check .hint { font-size: 11px; color: var(--muted); }
+
+/* commit bar */
+.commit { flex: none; height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 var(--pad); border-top: 1px solid var(--border); background: var(--surface); }
+.commit[hidden] { display: none; }
+.commit .dirty { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--warn); font-variant-numeric: tabular-nums; }
+.commit .dirty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.commit .res { display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+.commit.done .dirty, .commit.done .actions { display: none; }
+.commit.done .res { display: inline-flex; }
+.commit .res .ok { color: var(--run); font-weight: 600; }
+.commit .actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.commit .note { margin-left: auto; display: none; font-size: 12px; color: var(--muted); }
+/* 写入完成后只保留结果行，不再并列“与服务一致”的说明 */
+
+/* dock */
+.dock { flex: none; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 10px; border-top: 1px solid var(--border); background: var(--bg); color: var(--text2); font-size: 12px; }
+.dock.open { height: 240px; flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+.dockbar { flex: none; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 10px; }
+.dockbar .chev { transition: transform 140ms var(--ease); color: var(--muted); }
+.dock.open .dockbar .chev { transform: rotate(180deg); }
+.dockbar .ev { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
+.dockbar .ev .ago { color: var(--muted); }
+.dockbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.dockbody { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; border-top: 1px solid var(--border); }
+.dock.open .dockbody { display: flex; }
+.docktabs { flex: none; height: 32px; display: flex; align-items: center; gap: 16px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.docktab { position: relative; height: 32px; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); }
+.docktab[aria-selected="true"] { color: var(--text); }
+.docktab[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
+.docktools { margin-left: auto; display: flex; align-items: center; gap: 2px; color: var(--muted); }
+.logview { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 12px 10px; background: var(--code); font-family: var(--font-mono); font-size: 12px; line-height: 1.62; white-space: pre; color: var(--text2); }
+.logline { display: flex; gap: 10px; }
+.logline .t { color: var(--muted); flex: none; }
+.logline .m { min-width: 0; }
+.logline .lv-err { color: var(--err); }
+.logline .lv-warn { color: var(--warn); }
+.actline { display: flex; gap: 10px; align-items: baseline; padding: 1px 0; }
+.actline .t { color: var(--muted); font-family: var(--font-mono); font-size: 11px; flex: none; }
+.actline .ic { width: 12px; flex: none; }
+.actline .ok { color: var(--run); }
+.actline .ic.ok { color: var(--run); }
+
+/* presets */
+.pane-inner { padding: 16px var(--pad) 28px; max-width: 760px; }
+.panehead { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.panehead h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.panehead .push { margin-left: auto; }
+.grouphead { display: flex; align-items: center; gap: 8px; height: 32px; margin-top: 20px; color: var(--text2); font-size: 12px; font-weight: 500; }
+.grouphead .n { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.plist { border: 1px solid var(--border); border-radius: var(--r-panel); overflow: hidden; }
+.prow { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.prow:first-child { border-top: 0; }
+.prow:hover { background: var(--hover); }
+.prow .nm { font-size: 13px; font-weight: 500; color: var(--text); }
+.prow .sub { font-size: 11px; color: var(--muted); }
+.prow .right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.pill { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-chip); background: var(--accent-soft); color: var(--accent); font-size: 11px; }
+.note { margin-top: 16px; font-size: 12px; color: var(--muted); max-width: 60ch; }
+
+/* maintenance */
+.card { border: 1px solid var(--border); border-radius: var(--r-panel); padding: 12px 14px; }
+.card .line { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+.card .line + .line { border-top: 1px solid var(--border); }
+.card .k { color: var(--muted); font-size: 12px; }
+.card .v { font-family: var(--font-mono); font-size: 12px; color: var(--text); }
+.card .push { margin-left: auto; }
+details.summary { margin-top: 10px; }
+details.summary > summary { cursor: pointer; color: var(--text2); font-size: 12px; list-style: none; display: flex; align-items: center; gap: 6px; }
+details.summary > summary::-webkit-details-marker { display: none; }
+details.summary > summary::before { content: "▸"; color: var(--muted); font-size: 10px; }
+details.summary[open] > summary::before { content: "▾"; }
+details.summary .notes { margin: 8px 0 0; font-size: 12px; line-height: 1.65; color: var(--text2); max-width: 62ch; }
+.steps { margin-top: 8px; display: flex; flex-direction: column; }
+.step { display: flex; align-items: center; gap: 10px; height: 28px; font-size: 12px; color: var(--text2); }
+.step .ic { width: 14px; color: var(--muted); }
+.step.done .ic { color: var(--run); }
+.step.run .ic { color: var(--accent); }
+.step.fail .ic { color: var(--err); }
+.step .dur { margin-left: auto; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.step .meta { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.bar-ind { width: 84px; height: 4px; border-radius: 999px; background: var(--border-strong); overflow: hidden; }
+.bar-ind i { display: block; width: 45%; height: 100%; background: var(--accent); border-radius: 999px; }
+.mrow { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.mrow .label { font-size: 13px; color: var(--text2); }
+.mrow .push { margin-left: auto; }
+.switch { position: relative; width: 34px; height: 20px; border-radius: 999px; background: var(--border-strong); flex: none; border: 0; }
+.switch[aria-pressed="true"] { background: var(--accent); }
+.switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform 140ms var(--ease); }
+.switch[aria-pressed="true"] i { transform: translateX(14px); }
+.codeblock { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--code); border: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--text2); white-space: pre-wrap; word-break: break-all; max-height: 110px; overflow: auto; }
+
+/* empty / loading */
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 100%; padding: 32px; text-align: center; }
+.empty .markbox { width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--border); display: grid; place-items: center; color: var(--muted); }
+.empty h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.empty p { margin: 0; font-size: 12px; color: var(--muted); max-width: 46ch; line-height: 1.7; }
+.empty .btn { margin-top: 6px; }
+
+/* overlays */
+.scrim { position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,.32); display: none; }
+.scrim.show { display: block; }
+.scrim.blur { background: rgba(0,0,0,.45); backdrop-filter: blur(8px); z-index: 30; }
+.sheet { position: absolute; top: 0; right: 0; bottom: 0; width: 420px; z-index: 22; display: none; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); box-shadow: var(--shadow-modal); }
+.sheet.show { display: flex; }
+.sheet header { flex: none; height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border); }
+.sheet header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.sheet header .n { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.sheet header .x { margin-left: auto; }
+.sheet .content { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 18px 12px; }
+.diffrow { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; gap: 8px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.diffrow .nm { min-width: 0; font-size: 13px; color: var(--text); }
+.diffrow .fl { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diffrow .old { font-family: var(--font-mono); font-size: 12px; color: var(--del); background: var(--del-soft); padding: 1px 5px; border-radius: 4px; }
+.diffrow .arrow { color: var(--muted); font-size: 11px; }
+.diffrow .new { font-family: var(--font-mono); font-size: 12px; color: var(--add); background: var(--add-soft); padding: 1px 5px; border-radius: 4px; }
+.sheet details { margin-top: 12px; }
+.sheet details > summary { cursor: pointer; font-size: 12px; color: var(--text2); list-style: none; display: flex; gap: 6px; align-items: center; }
+.sheet details > summary::-webkit-details-marker { display: none; }
+.sheet details > summary::before { content: "▸"; color: var(--muted); font-size: 10px; }
+.sheet details[open] > summary::before { content: "▾"; }
+.sheet .raw { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--code); border: 1px solid var(--border); font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: var(--text2); word-break: break-all; }
+.sheet footer { flex: none; padding: 10px 18px 14px; border-top: 1px solid var(--border); }
+.sheet footer .hintline { font-size: 12px; color: var(--text2); line-height: 1.6; margin-bottom: 10px; }
+.sheet footer .acts { display: flex; justify-content: flex-end; gap: 8px; }
+
+.modalwrap { position: absolute; inset: 0; z-index: 32; display: none; place-items: center; }
+.modalwrap.show { display: grid; }
+.modal { width: 560px; max-width: calc(100% - 48px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sheet); box-shadow: var(--shadow-modal); display: flex; flex-direction: column; overflow: hidden; }
+.modal.sm { width: 400px; }
+.modal header { flex: none; height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 18px; border-bottom: 1px solid var(--border); }
+.modal header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.modal header .x { margin-left: auto; }
+.modal .content { padding: 8px 18px 14px; }
+.modal footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--border); }
+.srow { display: grid; grid-template-columns: minmax(0,1fr) 200px; align-items: center; gap: 16px; min-height: 44px; padding: 4px 0; border-top: 1px solid var(--border); }
+.srow:first-child { border-top: 0; }
+.srow .label { font-size: 13px; color: var(--text2); }
+.srow .hint { font-size: 11px; color: var(--muted); }
+.srow .swrap { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.about { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); line-height: 1.8; }
+.about b { color: var(--text2); font-weight: 500; }
+
+/* palette */
+.palette { position: absolute; z-index: 33; left: 50%; top: 12%; transform: translateX(-50%); width: 560px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); box-shadow: var(--shadow-modal); overflow: hidden; display: none; }
+.palette.show { display: block; }
+.palinput { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); }
+.palinput input { flex: 1 1 auto; border: 0; background: none; outline: none; font-size: 15px; color: var(--text); }
+.pallist { max-height: 320px; overflow: auto; padding: 6px; }
+.palsec { padding: 8px 8px 4px; font-size: 12px; font-weight: 600; color: var(--text2); }
+.palrow { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-radius: 6px; color: var(--text2); font-size: 13px; cursor: pointer; }
+.palrow .ic { width: 16px; color: var(--muted); flex: none; }
+.palrow .hint { margin-left: auto; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.palrow[aria-selected="true"] { background: var(--selected); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.palfoot { display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 12px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+.palfoot .k { display: inline-flex; gap: 4px; align-items: center; }
+
+.flash { animation: flash 700ms var(--ease); }
+@keyframes flash { 0%, 40% { background: var(--accent-soft); } 100% { background: transparent; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="masthead">
+    <h1>llama-ctl <span>· UI v4「石墨控制台」视觉稿</span></h1>
+    <p>静态视觉稿 · 非应用代码 · 令牌见 <span class="mono">docs/ui-redesign-v4.md</span> §2/§4</p>
+  </div>
+  <div class="screenlabel">
+    <b id="screenlabel">参数</b>
+    <span class="sep">/</span><span id="statelabel">3 项未应用</span>
+    <span class="sep">/</span><span id="sizelabel">1080 × 820 · 深色</span>
+    <span class="sep">·</span><span>Ctrl K 命令面板 · Ctrl 1/2/3 切页签</span>
+  </div>
+
+  <!-- ═══ 应用外壳 ═══ -->
+  <div class="app" id="app" data-w="1080">
+
+    <!-- App bar -->
+    <header class="appbar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none">
+            <path d="M3.4 13.4 8 2.8l4.6 10.6M6.1 9.2l5.5 4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span class="brandname">llama-ctl</span>
+      </div>
+      <button class="cmdtrig" id="cmdtrig" type="button">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 13.5 13.5"/></svg>
+        <span>搜索或运行命令</span>
+        <span class="k kbd">Ctrl K</span>
+      </button>
+      <div class="appbar-right">
+        <span class="demochip" title="演示数据：未连接到 Rust 后端">演示数据</span>
+        <button class="iconbtn" id="opensettings" type="button" aria-label="设置" title="设置">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      <!-- Sidebar -->
+      <aside class="sidebar" aria-label="服务">
+        <div class="sbhead">
+          <span>服务<span class="cnt">3</span></span>
+          <button class="iconbtn" type="button" aria-label="重新扫描服务" title="重新扫描服务（Shift F5）">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 3.6V6.4h-2.8"/></svg>
+          </button>
+        </div>
+        <div class="sblist" id="sblist">
+          <button class="svc" type="button" aria-current="true"><span class="dot run"></span><span class="nm">llama-prod</span></button>
+          <button class="svc" type="button"><span class="dot unk"></span><span class="nm">llama-dev</span></button>
+          <button class="svc" type="button"><span class="dot unk"></span><span class="nm">llama-bench</span></button>
+        </div>
+        <div class="sbfoot">
+          <button class="updchip" type="button" id="updchip">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V3.5"/><path d="M4.2 7.3 8 3.5l3.8 3.8"/></svg>
+            <span>有新版</span><span class="nm">b5610</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Workspace -->
+      <main class="workspace">
+        <div class="wsh">
+          <div class="wsh-id">
+            <div class="wsh-top">
+              <span class="wsh-name">llama-prod</span>
+            </div>
+            <div class="truth" title="healthz ok · 127.0.0.1:8080 · b5527 · 自启 自动 · F:\llama.cpp">
+              <span>healthz ok · 127.0.0.1:8080 · b5527</span>
+              <span class="sep">·</span><span>自启 <b>自动</b></span>
+              <span class="sep">·</span><span>F:\llama.cpp</span>
+            </div>
+          </div>
+          <div class="wsh-actions">
+            <span class="statechip" id="statechip"><span class="dot run"></span><span>运行中</span></span>
+            <button class="btn danger" type="button" id="btn-stop">停止</button>
+            <button class="btn" type="button" id="btn-restart">重启</button>
+          </div>
+        </div>
+
+        <nav class="tabs" role="tablist" id="tabs">
+          <button class="tab" role="tab" data-tab="params" aria-selected="true">参数 <span class="badge" id="tabbadge">3</span></button>
+          <button class="tab" role="tab" data-tab="presets" aria-selected="false">预设</button>
+          <button class="tab" role="tab" data-tab="maint" aria-selected="false">维护 <span class="badge" id="maintbadge">1</span></button>
+        </nav>
+
+        <div class="banner" id="errbanner">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="margin-top:2px;flex:none"><path d="M8 2.2 14.2 13.4H1.8z"/><path d="M8 6.4v3.1M8 11.6v.5"/></svg>
+          <div class="bodyline">
+            <div>读取服务状态失败：<span class="mono">sc query 返回 5（拒绝访问）</span></div>
+            <div style="color:var(--text2)">上次成功读取 12:03:41 · 数据可能已过期</div>
+            <div class="rowline">
+              <button class="btn" type="button">重试</button>
+              <button class="btn text" type="button">复制详情</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pane" id="pane">
+          <!-- 参数页 -->
+          <div class="view" id="view-params">
+            <div class="toolbar">
+              <div class="search">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 13.5 13.5"/></svg>
+                <input type="search" placeholder="搜索参数" aria-label="搜索参数" id="paramsearch" />
+                <span class="kbd">Ctrl F</span>
+              </div>
+              <button class="toggle" type="button" id="onlychanged" aria-pressed="false"><span class="box"></span>仅显示已修改</button>
+              <span class="spacer"></span>
+              <span class="chip" title="AppParameters 中有 2 个未识别的参数，Apply 时原样保留">+2 未识别</span>
+              <button class="iconbtn" type="button" aria-label="更多" title="更多">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><circle cx="3.2" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.8" cy="8" r="1.2"/></svg>
+              </button>
+            </div>
+            <div class="formwrap">
+              <nav class="toc" id="toc" aria-label="参数分区"></nav>
+              <div id="sections"></div>
+            </div>
+          </div>
+
+          <!-- 预设页 -->
+          <div class="view" id="view-presets" hidden>
+            <div class="pane-inner">
+              <div class="panehead">
+                <h2>参数预设</h2>
+                <button class="push btn filled" type="button" id="btn-savepreset">另存当前为预设</button>
+              </div>
+              <div class="grouphead">我的预设<span class="n">2</span></div>
+              <div class="plist">
+                <div class="prow">
+                  <div><div class="nm">32B 长上下文 <span class="pill">已载入</span></div><div class="sub">预设只填表单，不写服务</div></div>
+                  <div class="right"><button class="btn" type="button" disabled>载入</button><button class="iconbtn" type="button" aria-label="更多">⋯</button></div>
+                </div>
+                <div class="prow">
+                  <div><div class="nm">7B 快速</div><div class="sub">批大小 2048 · 并发 4</div></div>
+                  <div class="right"><button class="btn" type="button">载入</button><button class="iconbtn" type="button" aria-label="更多">⋯</button></div>
+                </div>
+              </div>
+              <div class="grouphead">自动备份<span class="n">2</span></div>
+              <div class="plist">
+                <div class="prow">
+                  <div><div class="nm mono" style="font-size:12px">自动备份 03-14 09:12:41</div><div class="sub">切换服务时生成</div></div>
+                  <div class="right"><button class="btn" type="button">载入</button><button class="btn text danger" type="button">删除</button></div>
+                </div>
+                <div class="prow">
+                  <div><div class="nm mono" style="font-size:12px">自动备份 03-13 21:40:07</div><div class="sub">切换预设时生成</div></div>
+                  <div class="right"><button class="btn" type="button">载入</button><button class="btn text danger" type="button">删除</button></div>
+                </div>
+              </div>
+              <p class="note">自动备份只在“有未应用更改时切换服务或预设”时生成，它只是预设，不写服务。当前不可批量清理——后端没有这个命令。</p>
+            </div>
+          </div>
+
+          <!-- 维护页 -->
+          <div class="view" id="view-maint" hidden>
+            <div class="pane-inner">
+              <div class="panehead"><h2>版本与更新</h2></div>
+              <div class="card">
+                <div class="line">
+                  <span class="k">当前</span><span class="v">b5527 · win-cuda-13.4-x64</span>
+                  <span class="push"><button class="btn" type="button">检查更新</button></span>
+                </div>
+                <div class="line">
+                  <span class="k">最新</span><span class="v">b5610 · 2025-03-14</span>
+                  <span class="push"><button class="btn filled" type="button" id="btn-install">立即更新</button></span>
+                </div>
+                <details class="summary">
+                  <summary>更新说明</summary>
+                  <div class="notes">官方 nightly 构建通常不提供更新说明；这里显示 release body 原文。更新会先停止服务、备份 llama.cpp 目录，任一步失败自动回滚。</div>
+                </details>
+              </div>
+
+              <div id="installblock" hidden>
+                <div class="panehead" style="margin-top:24px"><h2 style="font-size:13px">安装中</h2></div>
+                <div class="steps" id="steps">
+                  <div class="step done"><span class="ic">✓</span><span>停止服务</span><span class="dur">0.8s</span></div>
+                  <div class="step done"><span class="ic">✓</span><span>备份旧文件</span><span class="meta">F:\llama.cpp\.backup\2025-03-14T09-12-41</span><span class="dur">1.2s</span></div>
+                  <div class="step run"><span class="ic">●</span><span>下载 cudart-llama-b5610-bin-win-cuda-13.4-x64.zip</span><span class="bar-ind"><i></i></span></div>
+                  <div class="step"><span class="ic">○</span><span>校验</span></div>
+                  <div class="step"><span class="ic">○</span><span>替换文件</span></div>
+                  <div class="step"><span class="ic">○</span><span>重启服务</span></div>
+                  <div class="step"><span class="ic">○</span><span>探活</span></div>
+                </div>
+              </div>
+
+              <div class="panehead" style="margin-top:24px"><h2>开机自启</h2></div>
+              <div class="card">
+                <div class="mrow">
+                  <span class="label">开机自启</span>
+                  <span class="push" style="display:flex;align-items:center;gap:8px">
+                    <button class="switch" id="sw-boot" type="button" aria-pressed="true" aria-label="开机自启"><i></i></button>
+                    <span class="mono" style="font-size:11px;color:var(--muted)" id="bootstate">自动（开机）</span>
+                  </span>
+                </div>
+                <div style="font-size:11px;color:var(--muted)">由 NSSM 的 Start 模式决定；手动模式下需自行启动服务。</div>
+              </div>
+
+              <div class="panehead" style="margin-top:24px"><h2>高级信息</h2></div>
+              <div class="card">
+                <details class="summary">
+                  <summary>AppDirectory · AppParameters · 未识别参数 2</summary>
+                  <div class="codeblock">F:\llama.cpp</div>
+                  <div class="codeblock">-m "F:\models\Qwen3-32B-Q4_K_M.gguf" -a qwen3-32b -ngl 128 --spec-type draft-mtp --ctx-size 65536 -ctk q8_0 -ctv q8_0 -fa auto -np 1 -b 2048 -ub 512 -t 16 --temp 0.6 --min-p 0.05 --top-k 40 --top-p 0.95 --jinja --host 127.0.0.1 --port 8080 --no-mmap --foo bar</div>
+                  <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><span class="chip mono">--foo bar</span><span class="chip mono">--another-flag</span></div>
+                </details>
+              </div>
+            </div>
+          </div>
+
+          <!-- 空服务 -->
+          <div class="view" id="view-empty" hidden>
+            <div class="empty">
+              <span class="markbox">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2"/><path d="M4.2 6.2 6.2 8l-2 1.8M8.2 9.8h3.4"/></svg>
+              </span>
+              <h2>未发现 NSSM 服务</h2>
+              <p>llama-ctl 通过 NSSM 管理 llama.cpp 服务。先在命令行注册服务，再重新扫描。</p>
+              <button class="btn filled" type="button">重新扫描</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="commit" id="commit">
+          <span class="dirty" id="dirtylabel"><span id="dirtycount">3</span> 项未应用</span>
+          <button class="btn text" type="button" id="btn-review">查看变更</button>
+          <span class="res"><span class="ok">✓ 已写入 3 项</span><span>· 需重启后生效</span><button class="btn text" type="button" id="btn-restart2">重启服务</button></span>
+          <span class="note">与服务的启动参数一致</span>
+          <div class="actions">
+            <button class="btn" type="button" id="btn-revert">还原</button>
+            <button class="btn filled" type="button" id="btn-apply">应用更改 <span class="kbd">Ctrl ⏎</span></button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Dock -->
+    <footer class="dock" id="dock">
+      <div class="dockbar" id="dockbar">
+        <svg class="chev" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>
+        <span class="ev" id="dockev">活动 · 已写入 AppParameters，需重启 <span class="ago">· 2 秒前</span></span>
+        <span class="right"><span id="dockcount">server.err 3</span></span>
+      </div>
+      <div class="dockbody">
+        <div class="docktabs">
+          <button class="docktab" type="button" data-docktab="activity" aria-selected="true">活动</button>
+          <button class="docktab" type="button" data-docktab="err" aria-selected="false">server.err <span id="errcount" style="color:var(--muted)">3</span></button>
+          <span class="docktools">
+            <button class="iconbtn" type="button" aria-label="跟随" title="跟随">⇅</button>
+            <button class="iconbtn" type="button" aria-label="过滤" title="按关键字过滤">⌕</button>
+            <button class="iconbtn" type="button" aria-label="复制" title="复制全部">⧉</button>
+            <button class="iconbtn" type="button" aria-label="打开目录" title="打开所在目录">⌫</button>
+          </span>
+        </div>
+        <div class="logview" id="logview"></div>
+      </div>
+    </footer>
+
+    <!-- Overlays -->
+    <div class="scrim" id="scrim"></div>
+    <aside class="sheet" id="sheet" aria-label="变更审阅">
+      <header>
+        <h2>变更审阅</h2><span class="n" id="sheetcount">3 项改动</span>
+        <button class="iconbtn x" type="button" id="sheetclose" aria-label="关闭">✕</button>
+      </header>
+      <div class="content" id="sheetrows"></div>
+      <footer>
+        <div class="hintline" id="sheethint">服务正在运行：应用后需重启才生效，会中断进行中的推理。</div>
+        <div class="acts">
+          <button class="btn" type="button" id="sheetcancel">取消</button>
+          <button class="btn filled" type="button" id="sheetapply">应用并重启</button>
+        </div>
+      </footer>
+    </aside>
+
+    <div class="modalwrap" id="settingswrap">
+      <div class="modal" role="dialog" aria-label="设置">
+        <header><h2>设置</h2><button class="iconbtn x" type="button" data-close="settingswrap" aria-label="关闭">✕</button></header>
+        <div class="content">
+          <div class="srow"><div><div class="label">界面语言</div><div class="hint">参数详解保持中文</div></div>
+            <div class="swrap"><div class="selwrap" style="max-width:none"><select class="sel"><option>中文</option><option>English</option></select></div></div></div>
+          <div class="srow"><div><div class="label">外观</div><div class="hint">跟随系统时随 Windows 切换</div></div>
+            <div class="swrap"><div class="selwrap" style="max-width:none"><select class="sel" id="appear" style="width:200px"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div></div></div>
+          <div class="srow"><div><div class="label">界面动效</div><div class="hint">关闭后所有动画直跳终态</div></div>
+            <div class="swrap"><button class="switch" type="button" aria-pressed="true" aria-label="界面动效"><i></i></button></div></div>
+          <div class="srow"><div><div class="label">启动时检查更新</div><div class="hint">仅提示，不自动安装；更新在「维护」页</div></div>
+            <div class="swrap"><button class="switch" type="button" aria-pressed="true" aria-label="启动时检查更新"><i></i></button></div></div>
+          <div class="about">
+            <b>关于</b> llama-ctl 0.1.0 · Tauri 2 · Vue 3 · NaiveUI 2<br />
+            第三方许可随安装目录提供，不提供外链（ADR-0001）。
+          </div>
+        </div>
+        <footer><button class="btn filled" type="button" data-close="settingswrap">完成</button></footer>
+      </div>
+    </div>
+
+    <div class="modalwrap" id="confirmwrap">
+      <div class="modal sm" role="dialog" aria-label="确认">
+        <header><h2 id="cf-title">重启服务</h2><button class="iconbtn x" type="button" data-close="confirmwrap" aria-label="关闭">✕</button></header>
+        <div class="content"><p id="cf-msg" style="margin:8px 0 4px;font-size:13px;line-height:1.7;color:var(--text2)">重启将中断进行中的推理。继续？</p></div>
+        <footer>
+          <button class="btn" type="button" data-close="confirmwrap">取消</button>
+          <button class="btn filled" type="button" id="cf-ok">继续</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="scrim blur" id="palscrim"></div>
+    <div class="palette" id="palette">
+      <div class="palinput">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 13.5 13.5"/></svg>
+        <input id="palinput" placeholder="搜索参数、操作或服务" aria-label="命令面板" />
+        <span class="kbd">Esc</span>
+      </div>
+      <div class="pallist" id="pallist"></div>
+      <div class="palfoot">
+        <span class="k"><span class="kbd">↑↓</span> 选择</span>
+        <span class="k"><span class="kbd">⏎</span> 执行</span>
+        <span class="k"><span class="kbd">esc</span> 关闭</span>
+        <span style="margin-left:auto" id="palcount">0 条结果</span>
+      </div>
+    </div>
+  </div>
+  <!-- ═══ /应用外壳 ═══ -->
+</div>
+
+<div class="controls" role="group" aria-label="视觉稿评审控制">
+  <div class="grp">
+    <span class="lbl">屏幕</span>
+    <button class="seg" type="button" data-screen="params" aria-pressed="true">参数</button>
+    <button class="seg" type="button" data-screen="presets" aria-pressed="false">预设</button>
+    <button class="seg" type="button" data-screen="maint" aria-pressed="false">维护</button>
+    <button class="seg" type="button" data-screen="empty" aria-pressed="false">空服务</button>
+    <button class="seg" type="button" data-screen="error" aria-pressed="false">读取失败</button>
+  </div>
+  <div class="grp">
+    <span class="lbl">主题</span>
+    <button class="seg" type="button" data-theme-set="dark" aria-pressed="true">深色</button>
+    <button class="seg" type="button" data-theme-set="light" aria-pressed="false">浅色</button>
+  </div>
+  <div class="grp">
+    <span class="lbl">窗口</span>
+    <button class="seg" type="button" data-width="1080" aria-pressed="true">1080 × 820</button>
+    <button class="seg" type="button" data-width="880" aria-pressed="false">880 × 640</button>
+  </div>
+  <div class="grp">
+    <span class="lbl">覆盖层</span>
+    <button class="seg" type="button" id="btn-sheet">变更审阅</button>
+    <button class="seg" type="button" id="btn-palette">命令面板</button>
+  </div>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────────
+   视觉稿脚本：只为让状态可点，不含任何应用逻辑。
+   ───────────────────────────────────────────────────────────────────────────── */
+
+const SVC_VALUES = {
+  ngl: '99', ctx_size: '131072', temperature: '0.8'
+};
+
+const GROUPS = [
+  { id: 'model',  name: '模型与视觉',       desc: '' },
+  { id: 'accel',  name: '加速',             desc: '' },
+  { id: 'ctx',    name: '上下文与显存',     desc: '' },
+  { id: 'conc',   name: '并发与吞吐',       desc: '' },
+  { id: 'sample', name: '采样',             desc: '' },
+  { id: 'net',    name: '网络',             desc: '' },
+  { id: 'adv',    name: '高级',             desc: '' }
+];
+
+const KV = ['', 'f16', 'f32', 'bf16', 'q8_0', 'q4_0', 'q4_1', 'iq4_nl', 'q5_0', 'q5_1'];
+
+const FIELDS = [
+  { g:'model', k:'path', key:'model',  nm:'模型文件', fl:'-m / --model', v:'F:\\models\\Qwen3-32B-Q4_K_M.gguf' },
+  { g:'model', k:'path', key:'mmproj', nm:'视觉投影', fl:'--mmproj', v:'' },
+  { g:'model', k:'text', key:'alias',  nm:'模型别名', fl:'-a / --alias', v:'qwen3-32b' },
+
+  { g:'accel', k:'num', key:'ngl',              nm:'GPU 层数',   fl:'-ngl', v:'128', min:0, max:200, step:1, unit:'层' },
+  { g:'accel', k:'sel', key:'spec_type',        nm:'投机解码',   fl:'-spec-type', v:'draft-mtp', opts:['', 'draft-mtp', 'draft-eagle3', 'draft-simple', 'draft-dflash', 'draft-dspark'] },
+  { g:'accel', k:'path', key:'spec_draft_model',nm:'草稿模型',   fl:'--spec-draft-model', v:'' },
+  { g:'accel', k:'num', key:'spec_draft_n_max', nm:'草稿长度',   fl:'--spec-draft-n-max', v:'3', min:1, max:16, step:1, unit:'tok' },
+
+  { g:'ctx', k:'num', key:'ctx_size',   nm:'上下文长度',    fl:'-ctx-size', v:'65536', min:512, max:1048576, step:512, unit:'token' },
+  { g:'ctx', k:'sel', key:'ctk',        nm:'KV cache 类型 K', fl:'-ctk', v:'q8_0', opts:KV },
+  { g:'ctx', k:'sel', key:'ctv',        nm:'KV cache 类型 V', fl:'-ctv', v:'q8_0', opts:KV },
+  { g:'ctx', k:'sel', key:'flash_attn', nm:'Flash Attention', fl:'-fa', v:'auto', opts:['auto', 'on', 'off'] },
+
+  { g:'conc', k:'num', key:'parallel',    nm:'并发槽数',   fl:'-np', v:'1', min:1, max:16, step:1, unit:'槽' },
+  { g:'conc', k:'num', key:'batch_size',  nm:'批大小',     fl:'-b',  v:'2048', min:128, max:8192, step:128, unit:'tok' },
+  { g:'conc', k:'num', key:'ubatch_size', nm:'物理批大小', fl:'-ub', v:'512', min:64, max:2048, step:64, unit:'tok' },
+  { g:'conc', k:'num', key:'threads',     nm:'CPU 线程',   fl:'-t',  v:'16', min:1, max:64, step:1, unit:'线程' },
+
+  { g:'sample', k:'num',  key:'temperature', nm:'温度',       fl:'--temp', v:'0.6', min:0, max:2, step:0.05, unit:'' },
+  { g:'sample', k:'num',  key:'min_p',       nm:'min-p',      fl:'--min-p', v:'0.05', min:0, max:0.5, step:0.01, unit:'' },
+  { g:'sample', k:'num',  key:'top_k',       nm:'top-k',      fl:'--top-k', v:'40', min:0, max:100, step:1, unit:'' },
+  { g:'sample', k:'num',  key:'top_p',       nm:'top-p',      fl:'--top-p', v:'0.95', min:0, max:1, step:0.01, unit:'' },
+  { g:'sample', k:'text', key:'seed',        nm:'随机种子',   fl:'-s', v:'' },
+  { g:'sample', k:'check',key:'jinja',       nm:'Jinja 模板', fl:'--jinja', v:'1', hint:'默认开' },
+  { g:'sample', k:'text', key:'chat_template_kwargs', nm:'模板参数', fl:'--chat-template-kwargs', v:'' },
+
+  { g:'net', k:'sel',  key:'host', nm:'监听地址', fl:'--host', v:'127.0.0.1', opts:['127.0.0.1', '0.0.0.0', 'localhost'] },
+  { g:'net', k:'text', key:'port', nm:'端口',     fl:'--port', v:'8080' },
+
+  { g:'adv', k:'check', key:'no_mmap',      nm:'禁用 mmap',   fl:'--no-mmap', v:'1' },
+  { g:'adv', k:'check', key:'mlock',        nm:'锁定内存',    fl:'--mlock', v:'' },
+  { g:'adv', k:'check', key:'no_kv_offload',nm:'禁用 KV 卸载',fl:'--no-kv-offload', v:'' },
+  { g:'adv', k:'check', key:'cpu_moe',      nm:'MoE 走 CPU',  fl:'--cpu-moe', v:'' }
+];
+
+
+// 服务侧原值：字段初始值即“服务当前值”，其中三项是演示用的未应用改动
+FIELDS.forEach((f) => { if (!(f.key in SVC_VALUES)) SVC_VALUES[f.key] = f.v; });
+
+const state = {
+  dirty: new Map([['ngl', '99'], ['ctx_size', '131072'], ['temperature', '0.8']]),
+  tab: 'params',
+  dockOpen: false,
+  dockTab: 'activity',
+  width: '1080',
+  screen: 'params',
+  running: true,
+  applied: false
+};
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ── 渲染参数表单 ─────────────────────────────────────────────────────────── */
+function numRow(f) {
+  const value = f.v;
+  const min = f.min, max = f.max;
+  const pct = Math.round(((Number(value) - min) / (max - min)) * 100);
+  const svc = SVC_VALUES[f.key];
+  let svcMark = '';
+  if (svc !== undefined && state.dirty.has(f.key)) {
+    const sp = Math.round(((Number(svc) - min) / (max - min)) * 100);
+    svcMark = `<span class="svcmark" style="left:${sp}%" title="服务当前 ${svc}"></span>`;
+  }
+  return `<div class="num">
+    <div class="rail"><span class="fill" style="width:${pct}%"></span>${svcMark}<span class="thumb" style="left:${pct}%"></span></div>
+    <span class="numbox"><input class="mono" data-key="${f.key}" value="${esc(value)}" inputmode="decimal" aria-label="${esc(f.nm)}" /><span class="unit">${esc(f.unit || '')}</span></span>
+  </div>`;
+}
+
+function control(f) {
+  switch (f.k) {
+    case 'num': return numRow(f);
+    case 'sel': {
+      const opts = f.opts.map((o) => `<option value="${esc(o)}"${o === f.v ? ' selected' : ''}>${o === '' ? '（空）' : esc(o)}</option>`).join('');
+      return `<div class="selwrap"><select class="sel" data-key="${f.key}" aria-label="${esc(f.nm)}">${opts}</select></div>`;
+    }
+    case 'check': {
+      const on = f.v === '1' || f.v === 'on' || f.v === 'true';
+      return `<label class="check"><input type="checkbox" data-key="${f.key}"${on ? ' checked' : ''} /><span class="box"></span>${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : '<span class="hint">开启</span>'}</label>`;
+    }
+    case 'path':
+      return `<div class="path"><input class="tinput mono" data-key="${f.key}" value="${esc(f.v)}" placeholder="${esc(f.nm)}" aria-label="${esc(f.nm)}" /><button class="btn" type="button">浏览</button></div>`;
+    default:
+      return `<input class="tinput" data-key="${f.key}" value="${esc(f.v)}" placeholder="${esc(f.nm)}" aria-label="${esc(f.nm)}" />`;
+  }
+}
+
+function rowHTML(f) {
+  const changed = state.dirty.has(f.key);
+  const org = changed ? `<span class="org">↳ 原 ${esc(state.dirty.get(f.key))}</span>` : '';
+  return `<div class="row${changed ? ' changed' : ''}" data-field="${f.key}">
+    <button class="help" type="button" title="${esc(f.nm)}（${esc(f.fl)}）— 帮助来自 Rust 字符串表">?</button>
+    <span class="lbl"><span class="nm" title="${esc(f.nm)}">${esc(f.nm)}</span><span class="fl">${esc(f.fl)}</span></span>
+    <span class="ctlwrap">${control(f)}${org}</span>
+    <span class="gutter"><button class="resetbtn" type="button" data-reset="${f.key}" aria-label="重置 ${esc(f.nm)}" title="重置为服务当前值">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a5 5 0 1 0 1.6-3.7"/><path d="M3 3.6v2.8h2.8"/></svg>
+    </button></span>
+  </div>`;
+}
+
+function render() {
+  const wrap = $('#sections');
+  const only = $('#onlychanged').getAttribute('aria-pressed') === 'true';
+  $('#sections').innerHTML = GROUPS.map((g) => {
+    const fields = FIELDS.filter((f) => f.g === g.id);
+    const shown = only ? fields.filter((f) => state.dirty.has(f.key)) : fields;
+    if (!shown.length) return '';
+    const chg = fields.filter((f) => state.dirty.has(f.key)).length;
+    return `<section class="sec" id="sec-${g.id}">
+      <div class="sechead"><h3>${esc(g.name)}</h3><span class="n">${String(fields.length).padStart(2, '0')}</span>${chg ? `<span class="chg">已改 ${chg}</span>` : ''}</div>
+      <div class="rows">${shown.map(rowHTML).join('')}</div>
+    </section>`;
+  }).join('');
+
+  // TOC
+  $('#toc').innerHTML = GROUPS.map((g) => {
+    const fields = FIELDS.filter((f) => f.g === g.id);
+    const chg = fields.filter((f) => state.dirty.has(f.key)).length;
+    return `<a href="#sec-${g.id}" data-toc="${g.id}" class="${g.id === 'model' ? 'active' : ''}">${esc(g.name)}<span class="n">${chg ? `<span class="chg">${chg}</span>` : fields.length}</span></a>`;
+  }).join('');
+
+  bindFields();
+  syncDirtyUI();
+}
+
+function bindFields() {
+  $$('#sections [data-key]').forEach((el) => {
+    el.addEventListener('change', () => {
+      const key = el.getAttribute('data-key');
+      const field = FIELDS.find((x) => x.key === key);
+      const original = SVC_VALUES[key];
+      let val;
+      if (el.type === 'checkbox') val = el.checked ? '1' : '';
+      else val = el.value;
+      if (field) field.v = val;
+      if (String(val) === String(original)) state.dirty.delete(key);
+      else if (!state.dirty.has(key)) state.dirty.set(key, original);
+      // 保留已存在项的原值（编辑时以服务原值为准）
+      state.applied = false;
+      document.getElementById('commit').classList.remove('done');
+      syncDirtyUI();
+      // 重绘该行以显示“原值”
+      const row = el.closest('.row');
+      if (row && field) {
+        const changed = state.dirty.has(key);
+        row.classList.toggle('changed', changed);
+        let org = row.querySelector('.org');
+        if (changed && !org) {
+          const wrapEl = row.querySelector('.ctlwrap');
+          const span = document.createElement('span');
+          span.className = 'org';
+          span.textContent = `↳ 原 ${state.dirty.get(key)}`;
+          wrapEl.appendChild(span);
+        } else if (changed && org) {
+          org.textContent = `↳ 原 ${state.dirty.get(key)}`;
+        } else if (!changed && org) {
+          org.remove();
+        }
+      }
+    });
+  });
+  $$('#sections [data-reset]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const key = el.getAttribute('data-reset');
+      state.dirty.delete(key);
+      render();
+    });
+  });
+}
+
+function syncDirtyUI() {
+  const n = state.dirty.size;
+  const commit = $('#commit');
+  commit.hidden = n === 0;
+  $('#dirtycount').textContent = String(n);
+  const badge = $('#tabbadge');
+  badge.textContent = String(n);
+  badge.hidden = n === 0;
+  const label = $('#statelabel');
+  label.textContent = n ? `${n} 项未应用` : '与服务的启动参数一致';
+  // section counts
+  $$('#sections .sec').forEach((sec) => {
+    const id = sec.id.replace('sec-', '');
+    const fields = FIELDS.filter((f) => f.g === id);
+    const chg = fields.filter((f) => state.dirty.has(f.key)).length;
+    const head = sec.querySelector('.sechead');
+    let el = head.querySelector('.chg');
+    if (chg && !el) {
+      el = document.createElement('span');
+      el.className = 'chg';
+      head.appendChild(el);
+    }
+    if (el) { if (chg) el.textContent = `已改 ${chg}`; else el.remove(); }
+  });
+}
+
+/* ── 变更审阅浮层 ─────────────────────────────────────────────────────────── */
+function openSheet() {
+  const rows = FIELDS.filter((f) => state.dirty.has(f.key));
+  $('#sheetcount').textContent = `${rows.length} 项改动`;
+  $('#sheetrows').innerHTML = rows.map((f) => `<div class="diffrow">
+      <span class="nm">${esc(f.nm)}<span class="fl">${esc(f.fl)}</span></span>
+      <span class="old">${esc(state.dirty.get(f.key) || '（空）')}</span>
+      <span class="arrow">→</span>
+      <span class="new">${esc(currentValue(f.key) || '（空）')}</span>
+    </div>`).join('') + `<details><summary>服务当前参数（原文）</summary>
+      <div class="raw">-m "F:\\models\\Qwen3-32B-Q4_K_M.gguf" -a qwen3-32b -ngl 99 --spec-type draft-mtp --ctx-size 131072 -ctk q8_0 -ctv q8_0 -fa auto -np 1 -b 2048 -ub 512 -t 16 --temp 0.8 --min-p 0.05 --top-k 40 --top-p 0.95 --jinja --host 127.0.0.1 --port 8080 --no-mmap</div>
+    </details>`;
+  $('#sheethint').textContent = state.running
+    ? '服务正在运行：应用后需重启才生效，会中断进行中的推理。'
+    : '服务已停止：应用后下次启动生效，无需立即重启。';
+  $('#sheetapply').textContent = state.running ? '应用并重启' : '应用';
+  $('#sheethintwrap') && ($('#sheethintwrap').textContent = '');
+  $('#sheet').classList.add('show');
+  $('#scrim').classList.add('show');
+  $('#scrim').classList.remove('blur');
+}
+
+function currentValue(key) {
+  const el = document.querySelector(`#sections [data-key="${key}"]`);
+  if (!el) return '';
+  return el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value;
+}
+
+function closeSheet() {
+  $('#sheet').classList.remove('show');
+  $('#scrim').classList.remove('show');
+}
+
+/* ── 应用 / 还原 ──────────────────────────────────────────────────────────── */
+function applyChanges() {
+  closeSheet();
+  const n = state.dirty.size;
+  // 提交后：表单值成为服务值，脏标记清空
+  FIELDS.forEach((f) => {
+    if (state.dirty.has(f.key)) {
+      const v = currentValue(f.key);
+      SVC_VALUES[f.key] = v;
+    }
+  });
+  state.dirty.clear();
+  state.applied = true;
+  render();
+  const commit = $('#commit');
+  commit.hidden = false;
+  commit.classList.add('done');
+  commit.querySelector('.res').innerHTML = `<span class="ok">✓ 已写入 ${n} 项</span><span>· 需重启后生效</span><button class="btn text" type="button" id="btn-restart2">重启服务</button>`;
+  commit.querySelector('.res').querySelector('#btn-restart2').addEventListener('click', askRestart);
+  pushActivity([`已写入 AppParameters（${n} 项）`]);
+  $('#dockev').innerHTML = `活动 · 已写入 AppParameters，需重启 <span class="ago">· 2 秒前</span>`;
+}
+
+function revert() {
+  state.dirty.clear();
+  FIELDS.forEach((f) => { if (SVC_VALUES[f.key] !== undefined) f.v = SVC_VALUES[f.key]; });
+  $('#commit').classList.remove('done');
+  render();
+  pushActivity(['已还原到服务的启动参数']);
+  $('#dockev').innerHTML = `活动 · 已还原到服务的启动参数 <span class="ago">· 刚刚</span>`;
+}
+
+/* ── 活动 / 日志 ──────────────────────────────────────────────────────────── */
+const ACTIVITY = [
+  { t: '09:12:41', ok: true,  m: '已停止服务' },
+  { t: '09:12:42', ok: true,  m: '已写入 AppParameters（3 项）' },
+  { t: '09:12:42', ok: true,  m: '已启动服务' },
+  { t: '09:12:46', ok: true,  m: 'healthz ok · 127.0.0.1:8080' }
+];
+const ERR_LINES = [
+  { t: '12:03:11.482', m: 'srv  load_model: ngl = 128, ctx = 65536' },
+  { t: '12:03:11.503', m: 'srv  load_tensors: offloaded 128/128 layers to GPU' },
+  { t: '12:03:12.117', m: 'srv  server is listening on 127.0.0.1:8080' },
+  { t: '12:03:19.004', m: 'srv  [warn] prompt cache is disabled', lv: 'warn' },
+  { t: '12:04:02.771', m: 'srv  [error] slot 0: context overflow', lv: 'err' }
+];
+
+function pushActivity(lines) {
+  const now = new Date();
+  const t = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+  lines.forEach((m) => ACTIVITY.push({ t, ok: true, m }));
+  renderLog();
+}
+
+function renderLog() {
+  const view = $('#logview');
+  if (state.dockTab === 'activity') {
+    view.innerHTML = ACTIVITY.map((a) => `<div class="actline"><span class="t">${a.t}</span><span class="ic ok">✓</span><span>${esc(a.m)}</span></div>`).join('');
+  } else {
+    view.innerHTML = ERR_LINES.map((l) => `<div class="logline"><span class="t">${l.t}</span><span class="m ${l.lv ? 'lv-' + l.lv : ''}">${esc(l.m)}</span></div>`).join('');
+  }
+}
+
+/* ── 覆盖层与弹窗 ─────────────────────────────────────────────────────────── */
+function openWrap(id) { $('#' + id).classList.add('show'); }
+function closeWrap(id) { $('#' + id).classList.remove('show'); }
+
+let confirmAction = null;
+function askConfirm(title, msg, okText, action) {
+  $('#cf-title').textContent = title;
+  $('#cf-msg').textContent = msg;
+  $('#cf-ok').textContent = okText;
+  confirmAction = action;
+  openWrap('confirmwrap');
+}
+
+function askRestart() {
+  askConfirm('重启服务', '重启将中断进行中的推理。继续？', '重启', () => {
+    setChip('停止中', 'warn');
+    pushActivity(['正在重启 llama-prod…']);
+    setTimeout(() => setChip('启动中', 'warn'), 500);
+    setTimeout(() => {
+      setChip('运行中', 'run');
+      pushActivity(['已停止服务', '已启动服务', 'healthz ok · 127.0.0.1:8080']);
+      $('#dockev').innerHTML = `活动 · healthz ok · 127.0.0.1:8080 <span class="ago">· 刚刚</span>`;
+      const dock = $('#dock');
+      if (!dock.classList.contains('open')) return;
+    }, 2200);
+  });
+}
+
+function setChip(text, tone) {
+  const chip = $('#statechip');
+  chip.className = 'statechip' + (tone === 'warn' ? ' warn' : tone === 'idle' ? ' idle' : '');
+  chip.innerHTML = `<span class="dot ${tone === 'warn' ? 'warn' : tone === 'idle' ? 'unk' : 'run'}"></span><span>${text}</span>`;
+}
+
+/* ── 命令面板 ─────────────────────────────────────────────────────────────── */
+const PALETTE = [
+  { sec: '操作', rows: [
+    { ic: '↻', label: '重启服务', hint: 'llama-prod', act: () => askRestart() },
+    { ic: '■', label: '停止服务', hint: 'llama-prod', act: () => askConfirm('停止服务', '停止将中断进行中的推理。继续？', '停止', () => { setChip('已停止', 'idle'); state.running = false; }) },
+    { ic: '▶', label: '启动服务', hint: 'llama-prod', act: () => { setChip('运行中', 'run'); state.running = true; } },
+    { ic: '↵', label: '应用更改', hint: '3 项', act: () => openSheet() },
+    { ic: '⟲', label: '还原未应用更改', hint: '', act: () => revert() },
+    { ic: '◷', label: '检查更新', hint: '维护', act: () => { switchTab('maint'); switchScreen('maint'); } }
+  ]},
+  { sec: '参数', rows: FIELDS.map((f) => ({ ic: '·', label: f.nm, hint: `${GROUPS.find((g) => g.id === f.g).name} · ${f.v || '—'}`, field: f.key }))},
+  { sec: '服务', rows: [
+    { ic: '●', label: 'llama-prod', hint: '运行中', act: () => {} },
+    { ic: '○', label: 'llama-dev', hint: '状态未读取', act: () => {} },
+    { ic: '○', label: 'llama-bench', hint: '状态未读取', act: () => {} }
+  ]}
+];
+
+function renderPalette(q = '') {
+  const needle = q.trim().toLowerCase();
+  let total = 0;
+  const html = PALETTE.map((sec) => {
+    const rows = sec.rows.filter((r) => !needle || `${r.label} ${r.hint}`.toLowerCase().includes(needle));
+    if (!rows.length) return '';
+    total += rows.length;
+    return `<div class="palsec">${sec.sec}</div>` + rows.map((r, i) => `<div class="palrow" tabindex="0" data-pal="${sec.sec}-${i}" aria-selected="false"><span class="ic">${r.ic}</span><span>${esc(r.label)}</span><span class="hint">${esc(r.hint)}</span></div>`).join('');
+  }).join('');
+  $('#pallist').innerHTML = html || `<div style="padding:16px;color:var(--muted);font-size:12px">没有匹配项</div>`;
+  $('#palcount').textContent = `${total} 条结果`;
+  const first = $('.palrow');
+  if (first) first.setAttribute('aria-selected', 'true');
+  $$('.palrow').forEach((el) => {
+    el.addEventListener('click', () => runPalette(el));
+    el.addEventListener('mouseenter', () => {
+      $$('.palrow').forEach((x) => x.setAttribute('aria-selected', 'false'));
+      el.setAttribute('aria-selected', 'true');
+    });
+  });
+}
+
+function runPalette(el) {
+  const label = el.querySelector('span:nth-child(2)').textContent;
+  closePalette();
+  const op = PALETTE[0].rows.find((r) => r.label === label);
+  if (op && op.act) return op.act();
+  const field = FIELDS.find((f) => f.nm === label);
+  if (field) {
+    switchTab('params');
+    switchScreen('params');
+    const row = document.querySelector(`.row[data-field="${field.key}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      row.classList.remove('flash');
+      void row.offsetWidth;
+      row.classList.add('flash');
+      const input = row.querySelector('[data-key]');
+      input && input.focus({ preventScroll: true });
+    }
+  }
+}
+
+function openPalette() {
+  $('#palscrim').classList.add('show');
+  $('#palette').classList.add('show');
+  $('#palinput').value = '';
+  renderPalette('');
+  setTimeout(() => $('#palinput').focus(), 0);
+}
+function closePalette() {
+  $('#palscrim').classList.remove('show');
+  $('#palette').classList.remove('show');
+}
+
+/* ── 页签 / 屏幕 ──────────────────────────────────────────────────────────── */
+function switchTab(tab) {
+  state.tab = tab;
+  $$('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === tab)));
+  $('#view-params').hidden = tab !== 'params';
+  $('#view-presets').hidden = tab !== 'presets';
+  $('#view-maint').hidden = tab !== 'maint';
+  $('#view-empty').hidden = true;
+  $('#pane').scrollTop = 0;
+  updateScreenLabel();
+}
+
+function switchScreen(screen) {
+  state.screen = screen;
+  $$('[data-screen]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.screen === screen)));
+  const err = $('#errbanner');
+  err.classList.remove('show');
+  $('#dock').style.display = '';
+  if (screen === 'params') { $('#sblist').style.display = ''; switchTab('params'); }
+  if (screen === 'presets') { switchTab('presets'); }
+  if (screen === 'maint') { switchTab('maint'); }
+  if (screen === 'empty') {
+    $('#view-params').hidden = true; $('#view-presets').hidden = true; $('#view-maint').hidden = true;
+    $('#view-empty').hidden = false;
+    $('#commit').hidden = true;
+    $('#dock').style.display = 'none';
+  }
+  if (screen === 'error') {
+    switchTab('params');
+    err.classList.add('show');
+  }
+  updateScreenLabel();
+}
+
+function updateScreenLabel() {
+  const names = { params: '参数', presets: '预设', maint: '维护', empty: '空服务', error: '读取失败' };
+  $('#screenlabel').textContent = names[state.screen] || '参数';
+}
+
+function updateSizeLabel() {
+  const theme = document.documentElement.getAttribute('data-theme') === 'light' ? '浅色' : '深色';
+  $('#sizelabel').textContent = `${state.width} × ${state.width === '880' ? '640' : '820'} · ${theme}`;
+}
+/* ── 评审控制 ─────────────────────────────────────────────────────────────── */
+$$('[data-theme-set]').forEach((b) => b.addEventListener('click', () => {
+  document.documentElement.setAttribute('data-theme', b.dataset.themeSet);
+  $$('[data-theme-set]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  const sel = $('#appear');
+  if (sel) sel.value = b.dataset.themeSet;
+  updateSizeLabel();
+}));
+
+$$('[data-width]').forEach((b) => b.addEventListener('click', () => {
+  state.width = b.dataset.width;
+  $('#app').setAttribute('data-w', state.width);
+  $$('[data-width]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  updateSizeLabel();
+}));
+
+$$('[data-screen]').forEach((b) => b.addEventListener('click', () => switchScreen(b.dataset.screen)));
+
+$('#btn-sheet').addEventListener('click', openSheet);
+$('#btn-palette').addEventListener('click', openPalette);
+$('#cmdtrig').addEventListener('click', openPalette);
+$('#opensettings').addEventListener('click', () => openWrap('settingswrap'));
+$$('[data-close]').forEach((b) => b.addEventListener('click', () => closeWrap(b.dataset.close)));
+
+$('#btn-review').addEventListener('click', openSheet);
+$('#btn-apply').addEventListener('click', openSheet);
+$('#sheetcancel').addEventListener('click', closeSheet);
+$('#sheetclose').addEventListener('click', closeSheet);
+$('#sheetapply').addEventListener('click', applyChanges);
+$('#btn-revert').addEventListener('click', revert);
+
+$('#tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  switchTab(tab.dataset.tab);
+  switchScreen(tab.dataset.tab === 'params' ? 'params' : tab.dataset.tab);
+});
+
+$('#btn-stop').addEventListener('click', () => askConfirm('停止服务', '停止将中断进行中的推理。继续？', '停止', () => {
+  state.running = false; setChip('已停止', 'idle'); pushActivity(['已停止服务']);
+}));
+$('#btn-restart').addEventListener('click', askRestart);
+$('#cf-ok').addEventListener('click', () => {
+  const fn = confirmAction; confirmAction = null;
+  closeWrap('confirmwrap'); fn && fn();
+});
+
+$('#updchip').addEventListener('click', () => { switchScreen('maint'); });
+
+$('#onlychanged').addEventListener('click', (e) => {
+  const b = e.currentTarget;
+  b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+  render();
+});
+
+$('#dockbar').addEventListener('click', () => {
+  const dock = $('#dock');
+  dock.classList.toggle('open');
+  if (dock.classList.contains('open')) renderLog();
+  else $('#palcount') && 0;
+});
+$$('[data-docktab]').forEach((b) => b.addEventListener('click', () => {
+  state.dockTab = b.dataset.docktab;
+  $$('[data-docktab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+  renderLog();
+}));
+
+$('#btn-savepreset').addEventListener('click', () => {
+  askConfirm('另存当前为预设', '把当前表单存成一套命名预设（不写服务）。示例稿不打开命名输入框。', '保存', () => {
+    pushActivity(['已保存预设']);
+  });
+});
+
+$('#btn-install').addEventListener('click', () => {
+  askConfirm('立即更新', '将停止服务 llama-prod，并把旧文件备份到 F:\\llama.cpp\\.backup\\2025-03-14T09-12-41。继续？', '立即更新', () => {
+    $('#installblock').hidden = false;
+    pushActivity(['开始安装 b5610…']);
+    $('#dockev').innerHTML = `活动 · 安装中：下载 cudart-llama-b5610 <span class="ago">· 刚刚</span>`;
+  });
+});
+
+$('#sw-boot').addEventListener('click', (e) => {
+  const b = e.currentTarget;
+  const next = b.getAttribute('aria-pressed') !== 'true';
+  askConfirm('开机自启', `将把 NSSM 的启动模式改为「${next ? '自动' : '手动'}」，写入服务。继续？`, next ? '改为自动' : '改为手动', () => {
+    b.setAttribute('aria-pressed', String(next));
+    $('#bootstate').textContent = next ? '自动（开机）' : '手动';
+    pushActivity([`开机自启 → ${next ? '自动' : '手动'}`]);
+  });
+});
+
+$('#appear').addEventListener('change', (e) => {
+  const v = e.target.value;
+  if (v === 'system') return;
+  document.documentElement.setAttribute('data-theme', v);
+  $$('[data-theme-set]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.themeSet === v)));
+  updateSizeLabel();
+});
+
+$('#palinput').addEventListener('input', (e) => renderPalette(e.target.value));
+$('#palscrim').addEventListener('click', closePalette);
+
+document.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
+  if (mod && ['1', '2', '3'].includes(e.key)) {
+    e.preventDefault();
+    const tab = ['params', 'presets', 'maint'][Number(e.key) - 1];
+    switchTab(tab); switchScreen(tab);
+    return;
+  }
+  if (mod && e.key === 'Enter') { e.preventDefault(); if (state.dirty.size) openSheet(); }
+  if (e.key === 'Escape') {
+    if ($('#palette').classList.contains('show')) return closePalette();
+    if ($('#sheet').classList.contains('show')) return closeSheet();
+    if ($('#settingswrap').classList.contains('show')) return closeWrap('settingswrap');
+    if ($('#confirmwrap').classList.contains('show')) return closeWrap('confirmwrap');
+  }
+  if ($('#palette').classList.contains('show')) {
+    const rows = $$('.palrow');
+    const idx = rows.findIndex((r) => r.getAttribute('aria-selected') === 'true');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = Math.min(rows.length - 1, Math.max(0, idx + (e.key === 'ArrowDown' ? 1 : -1)));
+      rows.forEach((r, i) => r.setAttribute('aria-selected', String(i === next)));
+      rows[next] && rows[next].scrollIntoView({ block: 'nearest' });
+    }
+    if (e.key === 'Enter' && rows[idx]) { e.preventDefault(); runPalette(rows[idx]); }
+  }
+});
+
+// 参数搜索（视觉稿内过滤）
+$('#paramsearch').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  $$('#sections .row').forEach((row) => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = !q || text.includes(q) ? '' : 'none';
+  });
+});
+
+// 初始
+render();
+renderLog();
+syncDirtyUI();
+updateSizeLabel();
+</script>
+</body>
+</html>

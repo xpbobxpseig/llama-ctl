@@ -16,6 +16,7 @@
  * `src/api/field-copy.js` for the same reason.
  */
 export const SHELL_COPY = {
+  'preset.delete': { zh: '删除', en: 'Delete' },
   'settings.appear': { zh: '外观', en: 'Appearance' },
   'settings.motion': {
     zh: '动效（关闭后所有动画直跳终态）',
@@ -39,5 +40,31 @@ export const SHELL_COPY = {
   'shell.demo': {
     zh: '演示数据：未连接到 Rust 后端',
     en: 'Demo data: not connected to the Rust backend',
+  },
+  // The rail / workspace chrome (this redesign). Rust does not own these yet.
+  'rail.status': { zh: '服务状态', en: 'Service status' },
+  'rail.args': { zh: '启动参数', en: 'Launch args' },
+  'params.search': { zh: '搜索参数', en: 'Search parameters' },
+  'params.no_results': { zh: '没有匹配的参数', en: 'No matching parameters' },
+  'log.clear': { zh: '清空', en: 'Clear' },
+  'settings.desc': {
+    zh: '界面、外观与官方更新',
+    en: 'Interface, appearance and official updates',
+  },
+  'settings.section.interface': { zh: '界面', en: 'Interface' },
+  'settings.section.motion': { zh: '动效', en: 'Motion' },
+  'settings.language.label': { zh: '界面语言', en: 'Language' },
+  'settings.language.note': {
+    zh: '参数详解保持中文',
+    en: 'Parameter guides stay Chinese',
+  },
+  'settings.appearance.note': {
+    zh: '跟随系统时随 Windows 切换',
+    en: 'Follows Windows while set to System',
+  },
+  'settings.motion.label': { zh: '界面动效', en: 'Interface motion' },
+  'settings.motion.note': {
+    zh: '关闭后所有动画直跳终态',
+    en: 'Off = instant, no animation',
   },
 }

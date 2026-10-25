@@ -105,9 +105,18 @@ export async function restoreGeometry() {
   if (!w || !geo) return false
 
   try {
-    await w.setSize(new LogicalSize(geo.w, geo.h))
+    // 记忆的尺寸可能来自另一块屏（或另一个缩放比例），先收进当前工作区。
+    const sw = screen.availWidth
+    const sh = screen.availHeight
+    const wpx = Math.min(Math.max(geo.w, MIN_W), sw)
+    const hpx = Math.min(Math.max(geo.h, MIN_H), sh)
+    await w.setSize(new LogicalSize(wpx, hpx))
     if (geo.x !== null && geo.y !== null) {
-      await w.setPosition(new LogicalPosition(geo.x, geo.y))
+      // 标题栏必须留在屏内（y ≥ 0 且露头至少 80px），横向也至少留 120px 可抓：
+      // 这正是“窗口在屏幕外，拖也拖不回来”的成因。
+      const x = Math.max(-wpx + 120, Math.min(geo.x, sw - 120))
+      const y = Math.max(0, Math.min(geo.y, Math.max(0, sh - 80)))
+      await w.setPosition(new LogicalPosition(x, y))
     }
     return true
   } catch {
@@ -166,10 +175,10 @@ export async function flushGeometry() {
  * app are gone. The listener is unsubscribed as part of this module's
  * teardown, which the app calls when it unmounts.
  *
- * Like {@link restoreGeometry}, `onCloseRequested` needs a permission the
- * current capability set does not grant (`core:window:allow-close-requested`).
- * A refusal is caught and reported, so the shell keeps running without the
- * shutdown flush rather than failing to boot.
+ * Like {@link restoreGeometry}, closing needs `core:window:allow-destroy`: the
+ * `onCloseRequested` wrapper calls `destroy()` once the handler returns without
+ * `preventDefault()`. Without it the request is accepted, `destroy` is refused,
+ * and the window simply never closes — which is exactly how a dead ✕ looks.
  */
 export async function watchGeometry() {
   const w = window_()

@@ -15,21 +15,25 @@
 //! `Result<T, AppError>`, so the frontend can branch on `ok` without guessing
 //! which shape came back. See [`ipc`] for the wire contract.
 //!
-//! The two long operations ([`restart`], [`install_update`]) run on a blocking
-//! worker and stream one line per step; they must never sit on the webview's
-//! thread, because a silent minute is indistinguishable from a hang.
+//! **Every command runs on a blocking worker, never on the main thread.** A
+//! synchronous (non-`async`) Tauri command executes on the window's main
+//! thread, and the whole `AppState` is one mutex — so the old layout froze the
+//! window the moment any command waited on that mutex while a long operation
+//! (`restart`, `install_update`, a stalled `check_update`) held it. The main
+//! thread now only pumps the event loop; a command that has to queue behind a
+//! long install merely makes *its own* result late, which is survivable.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use llama_ctl_commands::ipc::{self, ErrorPayload, OkPayload};
-use llama_ctl_commands::snapshot::{self as cmd};
+use llama_ctl_commands::snapshot as cmd;
 use llama_ctl_core::deps::{AppError, AppErrorKind};
 use llama_ctl_core::persist::Settings;
 use llama_ctl_core::real::RealDeps;
 use llama_ctl_core::service::StartMode;
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// The authoritative state, shared by every command.
 pub struct AppState {
@@ -69,10 +73,6 @@ impl Default for DepsHandle {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn with_app<T>(state: &State<'_, AppState>, f: impl FnOnce(&mut cmd::App) -> T) -> T {
-    state.with(f)
 }
 
 // ---- payloads the frontend sends ----
@@ -117,96 +117,82 @@ fn emit(app: &AppHandle, event: &str, line: &str) {
 
 /// The whole-state Snapshot. One fetch, everything one screen needs.
 #[tauri::command]
-pub fn get_snapshot(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
+pub async fn get_snapshot(
+    handle: AppHandle,
     values: Option<FormValues>,
 ) -> Result<OkPayload, ErrorPayload> {
-    let snap = with_app(&app, |a| cmd::snapshot(d.deps(), a, values.as_ref()));
-    Ok(OkPayload::new(&snap))
+    run_worker(handle, move |d, a| Ok(cmd::snapshot(d, a, values.as_ref()))).await
 }
 
 /// The tail of the selected service's `server.err`, plus the path it came
 /// from so the UI can label the region. Costs one file read; the log region
 /// polls it, it is not part of every Snapshot.
 #[tauri::command]
-pub fn tail_log(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-) -> Result<OkPayload, ErrorPayload> {
-    let (lines, path) = with_app(&app, |a| {
-        (cmd::tail_log(d.deps(), a), cmd::log_path(d.deps(), a))
-    });
+pub async fn tail_log(handle: AppHandle) -> Result<OkPayload, ErrorPayload> {
     #[derive(serde::Serialize)]
     struct Tail {
         lines: Vec<String>,
         path: Option<String>,
     }
-    Ok(OkPayload::new(&Tail { lines, path }))
+    run_worker(handle, move |d, a| {
+        Ok(Tail { lines: cmd::tail_log(d, a), path: cmd::log_path(d, a) })
+    })
+    .await
 }
 
 /// Re-enumerate the NSSM services. Costs one powershell call (~0.6 s), so call
 /// it off the frame that paints the dropdown.
 #[tauri::command]
-pub fn refresh_services(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::refresh_services(d.deps(), a)))
+pub async fn refresh_services(handle: AppHandle) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, |d, a| cmd::refresh_services(d, a)).await
 }
 
 /// Switch the form to another service, optionally auto-backing-up the edits.
 #[tauri::command]
-pub fn switch_service(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
+pub async fn switch_service(
+    handle: AppHandle,
     args: SwitchArgs,
 ) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| {
-        cmd::switch_service(d.deps(), a, &args.service, args.values.as_ref(), args.backup)
-    }))
+    run_worker(handle, move |d, a| {
+        cmd::switch_service(d, a, &args.service, args.values.as_ref(), args.backup)
+    })
+    .await
 }
 
 // ---- write-back ----
 
 /// Apply the form: rebuild `AppParameters` and write it back.
 #[tauri::command]
-pub fn apply_changes(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
+pub async fn apply_changes(
+    handle: AppHandle,
     args: ApplyArgs,
 ) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::apply(d.deps(), a, &args.values, &args.extras)))
+    run_worker(handle, move |d, a| cmd::apply(d, a, &args.values, &args.extras)).await
 }
 
 /// Revert: discard the form and read the service again. Never writes.
 #[tauri::command]
-pub fn revert(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::revert(d.deps(), a)))
+pub async fn revert(handle: AppHandle) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, |d, a| cmd::revert(d, a)).await
 }
 
 // ---- service control ----
 
 /// `sc start` / `sc stop`.
 #[tauri::command]
-pub fn service_action(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
+pub async fn service_action(
+    handle: AppHandle,
     action: String,
 ) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::service_action(d.deps(), a, &action)))
+    run_worker(handle, move |d, a| cmd::service_action(d, a, &action)).await
 }
 
 /// Set the boot start mode. `mode` is `StartMode`'s own wire value (`"auto"` /
 /// `"manual"` / `"disabled"`), the same spelling the Snapshot returns; an
 /// unrecognised one falls back to `manual`, as the domain layer does.
 #[tauri::command]
-pub fn set_start_mode(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
+pub async fn set_start_mode(
+    handle: AppHandle,
     mode: String,
 ) -> Result<OkPayload, ErrorPayload> {
     let mode = match mode.as_str() {
@@ -214,7 +200,7 @@ pub fn set_start_mode(
         "disabled" => StartMode::Disabled,
         _ => StartMode::Manual,
     };
-    ipc::envelope(with_app(&app, |a| cmd::set_start_mode(d.deps(), a, mode)))
+    run_worker(handle, move |d, a| cmd::set_start_mode(d, a, mode)).await
 }
 
 /// Restart: stop, start, wait for the health probe — streaming one line per
@@ -238,55 +224,43 @@ pub async fn restart(
 
 /// Load a preset into the form. Reads only — the service is untouched.
 #[tauri::command]
-pub fn load_preset(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-    name: String,
-) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::load_preset(d.deps(), a, &name)))
+pub async fn load_preset(handle: AppHandle, name: String) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, move |d, a| cmd::load_preset(d, a, &name)).await
 }
 
 /// Save the form as a preset. `false` when the name already exists.
 #[tauri::command]
-pub fn save_preset(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-    args: PresetArgs,
-) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::save_preset(d.deps(), a, &args.name, &args.values)))
+pub async fn save_preset(handle: AppHandle, args: PresetArgs) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, move |d, a| cmd::save_preset(d, a, &args.name, &args.values)).await
 }
 
 /// Delete a preset.
 #[tauri::command]
-pub fn delete_preset(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-    name: String,
-) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::delete_preset(d.deps(), a, &name)))
+pub async fn delete_preset(handle: AppHandle, name: String) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, move |d, a| cmd::delete_preset(d, a, &name)).await
 }
 
 // ---- settings ----
 
 /// Persist preferences. A language change returns the new string table.
 #[tauri::command]
-pub fn save_settings(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
+pub async fn save_settings(
+    handle: AppHandle,
     settings: Settings,
 ) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::save_settings(d.deps(), a, &settings)))
+    run_worker(handle, move |d, a| cmd::save_settings(d, a, &settings)).await
 }
 
 // ---- updates ----
 
 /// Check for a newer official build. **Never installs** (ADR-0001).
+///
+/// On a worker: this is two HTTPS round-trips to GitHub, which on a bad route
+/// can take tens of seconds — on the main thread that was a frozen window the
+/// moment the app opened (the startup auto-check) or the user pressed 检查.
 #[tauri::command]
-pub fn check_update(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-) -> Result<OkPayload, ErrorPayload> {
-    ipc::envelope(with_app(&app, |a| cmd::check_update(d.deps(), a)))
+pub async fn check_update(handle: AppHandle) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, |d, a| cmd::check_update(d, a)).await
 }
 
 /// Install the release the last check found, streaming progress on
@@ -301,29 +275,42 @@ pub async fn install_update(handle: AppHandle) -> Result<OkPayload, ErrorPayload
 
 /// Startup cleanup of stale download / backup directories.
 #[tauri::command]
-pub fn prune_update_dirs(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-) -> Result<OkPayload, ErrorPayload> {
-    let removed = with_app(&app, |a| cmd::prune_update_dirs(d.deps(), a));
-    Ok(OkPayload::new(&removed))
+pub async fn prune_update_dirs(handle: AppHandle) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, |d, a| Ok(cmd::prune_update_dirs(d, a))).await
 }
 
 /// `true` when the form differs semantically from the service — lets the
 /// frontend decide whether to offer Revert without a whole snapshot.
 #[tauri::command]
-pub fn is_dirty(
-    d: State<'_, DepsHandle>,
-    app: State<'_, AppState>,
-    values: FormValues,
-) -> Result<OkPayload, ErrorPayload> {
-    let dirty = with_app(&app, |a| cmd::is_dirty(d.deps(), a, &values));
-    Ok(OkPayload::new(&dirty))
+pub async fn is_dirty(handle: AppHandle, values: FormValues) -> Result<OkPayload, ErrorPayload> {
+    run_worker(handle, move |d, a| Ok(cmd::is_dirty(d, a, &values))).await
 }
 
-// ---- long operations -------------------------------------------------------
+// ---- the worker path -------------------------------------------------------
 
-/// Run a long command on a blocking worker, streaming `event` per progress line.
+/// Run one command's body on a blocking worker.
+///
+/// The body closes over the managed state inside the worker (Tauri's async
+/// commands may not borrow `State` across the `await`), so the signatures here
+/// take an [`AppHandle`] instead. A panic in the body surfaces as a `Refused`
+/// envelope rather than taking the window down.
+async fn run_worker<T, F>(handle: AppHandle, f: F) -> Result<OkPayload, ErrorPayload>
+where
+    T: serde::Serialize + Send + 'static,
+    F: FnOnce(&RealDeps, &mut cmd::App) -> Result<T, AppError> + Send + 'static,
+{
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        let d = handle.state::<DepsHandle>();
+        let app = handle.state::<AppState>();
+        app.with(|a| f(d.deps(), a))
+    })
+    .await
+    .unwrap_or_else(|e| Err(AppError::new(AppErrorKind::Refused, format!("worker failed: {e}"))));
+
+    ipc::envelope(out)
+}
+
+/// [`run_worker`] plus a progress sink that streams one line per step.
 ///
 /// The command returns `Option<T>` so one that yields a snapshot and one that
 /// reports only through its log can share this path.

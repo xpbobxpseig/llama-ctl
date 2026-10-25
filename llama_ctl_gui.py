@@ -36,6 +36,7 @@ import strings
 import updater
 import installer
 from strings import t, fmt
+import icon as ic
 
 
 def _resource_dir():
@@ -324,6 +325,9 @@ FIELDS = [
     {"key": "jinja", "group": "采样", "kind": "check",
      "label": "Jinja 模板 (--jinja)", "label_en": "Jinja template (--jinja)",
      "aliases": ["--jinja"],
+     # 官方提供成对开关 `--jinja, --no-jinja`（默认开启）：取消勾选必须显式写
+     # --no-jinja，否则「不写任何标志」= 保持默认开启，用户以为关掉了其实没关。
+     "off_aliases": ["--no-jinja"],
      "help": "启用服务端 Jinja 聊天模板渲染。参考配置（Qwen 官方示例）均带 --jinja，"
              " 能正确套用模型的对话/思考模板。本服务也应勾上，否则可能用错模板导致格式异常。",
      "help_en": "Enable server-side Jinja chat template rendering. Official Qwen examples include --jinja to apply "
@@ -471,13 +475,36 @@ def _set_appearance(mode):
         pass
     resolved = "dark" if ctk.get_appearance_mode().lower() == "dark" else "light"
     _apply_palette(resolved)
+    ic.set_appearance(resolved)          # 图标缓存按新外观重建
     return resolved
 
 
-F_BODY = ("Microsoft YaHei UI", 13)
-F_SMALL = ("Microsoft YaHei UI", 12)
-F_TITLE = ("Microsoft YaHei UI", 18, "bold")
-F_GROUP = ("Microsoft YaHei UI", 12, "bold")
+# ---------------------------------------------------------------------------
+# 字体令牌（v2 统一字阶，依据 docs/design/font-icon-spec.html）
+# ---------------------------------------------------------------------------
+# 修掉 v1 的三个结构性问题：
+#   1. 卡片标题 / 折叠组头 / 日志开关 三者共用 F_GROUP(12 bold) —— 三个不同角色
+#      一个样式，层级消失。现拆为 F_SECTION(卡片) / F_GROUP(组头) / F_BODY(开关)。
+#   2. 数值读数 Consolas 12 与文本输入 YaHei 13 行高差 4px，同一行的控件基线不齐。
+#      现 F_MONO 取 13（与 F_BODY 同字号），行盒一致。
+#   3. 字阶只有 12/13/18 三档且中间没有可用的层级，现为 18/15/13/13/12/11 六档。
+#
+# Tk 只支持 normal | bold 两种字重（'semibold'/'600' 会抛 TclError），
+# 故层级差异只能靠**字号 + 字重**表达，不依赖中间字重。
+_UI_FAMILY = "Microsoft YaHei UI"      # 主字体：中文界面最稳，随系统自带
+_MONO_FAMILY = "Cascadia Mono"         # 数值/日志：Win11 自带，回退 Consolas
+
+F_DISPLAY = (_UI_FAMILY, 18, "bold")   # 窗口标题
+F_SECTION = (_UI_FAMILY, 15, "bold")   # 卡片标题（原与组头同为 12 bold）
+F_GROUP = (_UI_FAMILY, 13, "bold")     # 折叠组头（原与卡片标题同为 12 bold）
+F_BODY = (_UI_FAMILY, 13)              # 参数标签 / 按钮 / 输入框 / 日志开关
+F_SMALL = (_UI_FAMILY, 12)             # 辅助说明
+F_MICRO = (_UI_FAMILY, 11)             # 最小层级（状态附属信息）
+F_MONO = (_MONO_FAMILY, 13)            # 数值读数（与 F_BODY 同行高，消除 4px 错位）
+F_MONO_SM = (_MONO_FAMILY, 11)         # 日志行（等宽、紧凑）
+
+# 兼容别名：旧代码按 F_TITLE 引用窗口标题
+F_TITLE = F_DISPLAY
 
 
 class _HelpTip:
@@ -726,6 +753,11 @@ class ControlGUI(ctk.CTk):
         self.service = DEFAULT_SERVICE
         self.values = {f["key"]: "" for f in FIELDS}
         self.extras = []
+        # 表单内容当前对应哪个预设（"" = 不对应任何预设，如刚载入服务参数）。
+        # 与下拉显示名区分：显示名只是「下次保存会用的名字」，不能用来判定
+        # 「能否覆盖这个预设」——否则启动自动选中就会让应用动作覆盖用户
+        # 从未碰过的预设。
+        self._preset_loaded = ""
         self.var = {}
         self.widgets = {}
         self.val_labels = {}
@@ -768,6 +800,7 @@ class ControlGUI(ctk.CTk):
         self._upd_installing = False  # 官方更新安装进行中（关窗守护）
         self._close_after_restart = False  # 用户确认退出后，等重启收尾再关窗
         self._upd_checking = False    # 防重入
+        self._upd_build_pending = False  # 本地 build 号后台查询进行中（避免重复 spawn）
         self._upd_worker = None       # 后台检查线程
         self._upd_modal_open = False  # 更新日志弹窗互斥（startup 提示与手动检查）
         self._upd_startup_after = None
@@ -994,7 +1027,7 @@ class ControlGUI(ctk.CTk):
         inner = ctk.CTkFrame(fr, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=14, pady=12)
         if title:
-            ctk.CTkLabel(inner, text=title, font=F_GROUP, text_color=C_MUT,
+            ctk.CTkLabel(inner, text=title, font=F_SECTION, text_color=C_MUT,
                          anchor="w").pack(fill="x", pady=(0, 8))
         # 卡片边框保持 C_BORDER 恒定：已移除 hover 亮边动效（鼠标靠近卡片边缘时
         # <Enter>/<Leave> 高频切换造成边框闪烁），视觉安静无闪烁。
@@ -1005,7 +1038,6 @@ class ControlGUI(ctk.CTk):
         """首帧下拉值：用上次枚举结果（settings["services"]），无则只放当前服务。
 
         #3 启动骨架：绝不在首帧同步调用 list_nssm_services()（PowerShell
-        Get-CimInstance 实测 ~646ms，会卡住第一次绘制）。真实枚举交给
         _status_worker，结果回灌后刷新下拉（见 _drain_status）。
         """
         cached = [s for s in self.settings.get("services", []) if isinstance(s, str)]
@@ -1036,8 +1068,13 @@ class ControlGUI(ctk.CTk):
         st = self._card(self)
         row = ctk.CTkFrame(st, fg_color="transparent")
         row.pack(fill="x")
-        self.dot_state = ctk.CTkLabel(row, text="\u25CF", width=12, font=F_BODY)
-        self.dot_state.configure(text_color=C_STOP)
+        # 状态点：用图标资产而非字体字符 U+25CF。
+        # 旧实现是 text="\u25CF" —— 尺寸由 Microsoft YaHei UI 的字形决定（13px 字号下
+        # 实测墨迹 13x23px），与图标网格无关，也不随主题走图标缓存。现改为
+        # dot-* glyph + tinted() 运行时着色：形状由 24 单位网格决定，呼吸/闪烁仍按
+        # 原逻辑换色（tinted 按量化色缓存，动效帧复用率极高）。
+        self.dot_state = ctk.CTkLabel(row, text="", width=16,
+                                      image=ic.tinted("dot-run", 14, C_STOP))
         self.dot_state.pack(side="left")
         self.lbl_state = ctk.CTkLabel(row, text=t("state.unknown"), font=F_BODY, text_color=C_MUT)
         self.lbl_state.pack(side="left")
@@ -1069,25 +1106,14 @@ class ControlGUI(ctk.CTk):
         pr = self._card(self)
         prow = ctk.CTkFrame(pr, fg_color="transparent")
         prow.pack(fill="x")
-        ctk.CTkLabel(prow, text=t("card.presets"), font=F_GROUP, text_color=C_MUT).pack(side="left")
+        ctk.CTkLabel(prow, text=t("card.presets"), font=F_SECTION, text_color=C_MUT).pack(side="left")
         self.lbl_dirty = ctk.CTkLabel(prow, text="", font=F_SMALL, text_color=C_ORG)
         self.lbl_dirty.pack(side="left", padx=12)
         self.btn_revert = self._btn(prow, t("btn.revert"), self.load_params)
         self.btn_revert.pack(side="right")
         self.btn_apply = self._btn(prow, t("btn.apply2"), self.apply_changes, kind="primary")
         self.btn_apply.pack(side="right", padx=(0, 8))
-        base = _resource_dir()
-        try:
-            _im = PILImage.open(os.path.join(base, "ic_trash.png")).convert("RGBA")
-            _im.load()
-            # 图标重绘（P2-9）：文件重绘为 72x144（上=亮色层、下=暗色层，
-            # 18px 逻辑尺寸的 4x 超采样矢量级绘制）。CTkImage 按 DPI 缩放到
-            # 18/27px 时从高清源降采样，取代原 32px 位图近邻直缩的发虚边缘。
-            ic_del = ctk.CTkImage(light_image=_im.crop((0, 0, 72, 72)),
-                                  dark_image=_im.crop((0, 72, 72, 144)),
-                                  size=(18, 18))
-        except Exception:  # noqa: BLE001 - 图标缺失/损坏退化为文字
-            ic_del = None
+        ic_del = ic.glyph("trash", 18)   # 统一图标体系(assets/icons/glyph_trash.png)
         self.preset_var = tk.StringVar()
         self.cmb_preset = ctk.CTkComboBox(prow, variable=self.preset_var, values=[],
                                           width=300, font=F_BODY,
@@ -1112,13 +1138,13 @@ class ControlGUI(ctk.CTk):
         pc.pack(fill="both", expand=True, padx=14, pady=12)
         phead = ctk.CTkFrame(pc, fg_color="transparent")
         phead.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(phead, text=t("card.params"), font=F_GROUP, text_color=C_MUT,
+        ctk.CTkLabel(phead, text=t("card.params"), font=F_SECTION, text_color=C_MUT,
                      anchor="w").pack(side="left")
         self.scroll = ctk.CTkScrollableFrame(pc, fg_color="transparent",
                                              scrollbar_button_color=C_GRAY,
                                              scrollbar_button_hover_color=C_MUT)
         self.scroll.pack(fill="both", expand=True)
-        self.scroll.grid_columnconfigure(2, weight=1)
+        # D8 折叠分组：每个 group 一个可折叠区（头按钮 + 独立 grid 容器，行号各从 0 计）
         # D8 折叠分组：每个 group 一个可折叠区（头按钮 + 独立 grid 容器，行号各从 0 计）
         self._group_containers = {}  # group -> 内容 CTkFrame
         self._group_headers = {}     # group -> 头部按钮
@@ -1134,6 +1160,7 @@ class ControlGUI(ctk.CTk):
             self.group_open.setdefault(g, i < 2)
             head = ctk.CTkButton(
                 self.scroll, text=self._group_label(g), font=F_GROUP,
+                image=ic.chevron(self.group_open[g]),
                 text_color=C_ACC if self.group_open[g] else C_MUT,
                 fg_color="transparent", hover_color=C_BG,
                 anchor="w", height=30, corner_radius=6,
@@ -1171,11 +1198,11 @@ class ControlGUI(ctk.CTk):
         head = ctk.CTkFrame(lg, fg_color="transparent")
         head.pack(fill="x", padx=14, pady=(10, 4))
         self.btn_log_toggle = ctk.CTkButton(
-            head, text=t("log.collapsed"), font=F_GROUP,
+            head, text=t("log.collapsed"), font=F_BODY,
             text_color=C_MUT, anchor="w", fg_color="transparent",
             hover_color=C_BG, command=self.toggle_log)
         self.btn_log_toggle.pack(side="left")
-        self.txt_log = ctk.CTkTextbox(lg, height=40, font=("Consolas", 11),
+        self.txt_log = ctk.CTkTextbox(lg, height=40, font=F_MONO_SM,
                                       fg_color=C_FIELD, border_width=1,
                                       border_color=C_BORDER, text_color=C_TXT,
                                       wrap="none")
@@ -1188,12 +1215,10 @@ class ControlGUI(ctk.CTk):
         self.lbl_warn = ctk.CTkLabel(self, text="", font=F_SMALL, text_color=C_ORG,
                                      anchor="w", justify="left")  # wraplength 由 _sync_wraplengths 动态设置
         self.lbl_warn.pack(fill="x", padx=16, pady=(2, 8))
-
     def _group_label(self, group):
-        """组头文案：本地化组名 + 展开指示（▾ 展开 / ▸ 收起）。"""
+        """组头文案:本地化组名(展开指示改用统一 chevron 图标,见 _toggle_group)。"""
         label = GROUP_NAMES.get(group, group) if strings._current == "en" else group
-        indicator = chr(0x25BE) if self.group_open.get(group, False) else chr(0x25B8)
-        return f"{label} {indicator}"
+        return label
 
     def _toggle_group(self, group):
         """点击组头切换展开/收起（D8）。瞬时切换优先正确性；状态写入
@@ -1202,6 +1227,7 @@ class ControlGUI(ctk.CTk):
         head = self._group_headers[group]
         body = self._group_containers[group]
         head.configure(text=self._group_label(group),
+                       image=ic.chevron(self.group_open[group]),
                        text_color=C_ACC if self.group_open[group] else C_MUT)
         if self.group_open[group]:
             body.grid()
@@ -1216,10 +1242,11 @@ class ControlGUI(ctk.CTk):
 
     def _build_field(self, parent, fld, row):
         key = fld["key"]
-        btn = ctk.CTkButton(parent, text="?", width=26, height=26, corner_radius=13,
-                            font=F_SMALL, fg_color="transparent", border_width=1,
-                            border_color=C_BORDER, hover_color=C_BG, text_color=C_MUT,
-                            cursor="question_arrow")
+        _q = ic.glyph("question", 14)
+        btn = ctk.CTkButton(parent, text="" if _q else "?", width=26, height=26,
+                            corner_radius=13, font=F_SMALL, fg_color="transparent",
+                            border_width=1, border_color=C_BORDER, hover_color=C_BG,
+                            text_color=C_MUT, image=_q, cursor="question_arrow")
         btn.grid(row=row, column=0, padx=(0, 8), pady=4)
         _HelpTip(btn, lambda k=key: self._help_text(k), motion_on=self._motion_on,
                      anim=self.anim)
@@ -1242,7 +1269,7 @@ class ControlGUI(ctk.CTk):
                               command=lambda val, k=key: self._on_slide(k, val))
             w.grid(row=row, column=2, sticky="w", padx=4, pady=6)
             self.widgets[key] = w
-            lbl = ctk.CTkLabel(parent, text="", font=("Consolas", 12), text_color=C_MUT,
+            lbl = ctk.CTkLabel(parent, text="", font=F_MONO, text_color=C_MUT,
                                width=110, anchor="w")
             lbl.grid(row=row, column=3, sticky="w")
             self.val_labels[key] = lbl
@@ -1453,16 +1480,28 @@ class ControlGUI(ctk.CTk):
 
     # ---- 状态刷新 ----
     def on_service_change(self):
-        """切换服务：若有未应用更改，先确认（可自动备份为预设）。"""
+        """切换服务：若有未应用更改，先确认（可自动备份为预设）。
+
+        确认框问的是「是否切换」：答**否**必须整体中止切换并把下拉显示回滚到
+        当前服务，否则 refresh_all() 会用新服务的参数覆盖表单——用户的编辑
+        静默消失，而这正是本项目其它路径（切语言/外观）已经修过的同一类缺陷。
+        """
         new_name = self.service_var.get()
         if new_name != self.service and self._dirty():
-            if messagebox.askyesno(t("mb.confirm"), fmt("msg.svc.dirty", n=new_name)):
-                values, _ = self._collect()
-                presets = load_presets()
-                presets[fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M:%S'))] = values
-                save_presets(presets)
-                self.refresh_presets()
+            if not messagebox.askyesno(t("mb.confirm"), fmt("msg.svc.dirty", n=new_name)):
+                try:
+                    self.service_var.set(self.service)   # 回滚下拉显示
+                except Exception:  # noqa: BLE001 - 控件销毁竞态
+                    pass
+                return
+            values, _ = self._collect()
+            presets = load_presets()
+            presets[fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M:%S'))] = values
+            self._save_presets(presets)
+            self.refresh_presets()
         self.service = new_name
+        # 换了服务：表单即将被新服务参数覆盖，不再对应任何预设
+        self._preset_loaded = ""
         self.refresh_all()
 
     def refresh_all(self):
@@ -1475,6 +1514,20 @@ class ControlGUI(ctk.CTk):
         if last and last in load_presets():
             self.preset_var.set(last)
             self.load_preset(last)
+
+    # ---- 状态圆点（图标资产，形状随状态变化） ----
+    _DOT_SIZE = 14
+
+    def _set_dot(self, name, color):
+        """按状态换「形状 + 颜色」的圆点。
+
+        v2 起圆点是图标资产而非字体字符：形状本身携带语义
+        （运行=实心核+光环 / 停止=方核 / 错误=感叹号 / 未应用=斜线环），
+        颜色只作二次强化。tinted() 按量化色缓存，动效逐帧换色不会失控。
+        """
+        img = ic.tinted(name, self._DOT_SIZE, color)
+        if img is not None:
+            self.dot_state.configure(image=img)
 
     @staticmethod
     def _state_color(state):
@@ -1500,8 +1553,7 @@ class ControlGUI(ctk.CTk):
                     > _BREATH_IDLE_S):
                 return  # 静止优先：30s 无交互停帧（圆点停在当前色，动鼠标即恢复）
             amp = 0.12 * (0.5 - 0.5 * math.cos(2 * math.pi * p))
-            self.dot_state.configure(
-                text_color=format_hex(lerp(C_RUN, _breath_peak, amp)))
+            self._set_dot("dot-run", format_hex(lerp(C_RUN, _breath_peak, amp)))
 
         _BREATH_IDLE_S = 30  # P3：30s 无交互呼吸停帧（帧内判定，循环不终止）
         if not self._breathing or self._breath_busy:
@@ -1520,13 +1572,13 @@ class ControlGUI(ctk.CTk):
         降级（animate 返回 -1）时 on_done 已同步执行，不续调。
         """
         if not self._motion_on():
-            self.dot_state.configure(text_color=C_RED)
+            self._set_dot("dot-error", C_RED)
             return
 
         def _frame(p):
             t = ease_out_cubic(p, 1)  # 索引式缓动：i=p, steps=1 → 连续化
             red = math.sin(t * 4 * math.pi) > 0  # 2 轮完整交替：红/原/红/原（2×300ms）
-            self.dot_state.configure(text_color=C_RED if red else C_RUN)
+            self._set_dot("dot-error" if red else "dot-run", C_RED if red else C_RUN)
 
         self._flash_id = self.anim.animate(
             _frame, 600, on_done=self._flash_done)
@@ -1540,7 +1592,7 @@ class ControlGUI(ctk.CTk):
             self._breathing = True
             self._breath_loop()
         else:
-            self.dot_state.configure(text_color=C_RUN)  # 安全回退：闪烁只在 RUNNING 时触发
+            self._set_dot("dot-run", C_RUN)  # 安全回退：闪烁只在 RUNNING 时触发
 
     def _update_status_dot(self, state, health_ok):
         """状态圆点同步入口（refresh_status 与 _poll_health 共用）。
@@ -1563,7 +1615,6 @@ class ControlGUI(ctk.CTk):
                     if self._breath_id > 0:
                         self.anim.cancel(self._breath_id)
                         self._breath_id = -1
-                    self.dot_state.configure(text_color=C_RUN)
             else:
                 self._breathing = False
                 if self._breath_id > 0:
@@ -1582,8 +1633,11 @@ class ControlGUI(ctk.CTk):
                 self._breath_resume = False
                 self.anim.cancel(self._flash_id)
                 self._flash_id = -1
-            self.dot_state.configure(
-                text_color=C_STOP if state == "STOPPED" else C_ORG)
+            if state == "STOPPED":
+                self._set_dot("dot-stop", C_STOP)
+            else:
+                # 过渡态（STARTING/STOPPING/未知）：未应用更改的斜线环复用为「中间态」
+                self._set_dot("dot-dirty", C_ORG)
 
     def refresh_status(self):
         """派活给 worker（拖拽卡顿修复）：不再同步 sc_query_state/check_health。
@@ -1623,34 +1677,79 @@ class ControlGUI(ctk.CTk):
             self.lbl_warn.configure(text=" | ".join(warnings) if warnings else "")
 
     def load_params(self):
+        """用服务当前参数覆盖表单。
+
+        表单内容此后来自**服务**而非任何预设，故清掉 _preset_loaded：否则
+        下拉若刚好显示同名预设，「应用更改」会把服务参数写进那个预设。
+        调用方若确实想让表单对应某预设（如 refresh_all 恢复 last_preset），
+        必须在这之后显式重新 load_preset()。
+        """
         text = get_app_parameters(self.service)
         values, extras, warnings = parse_params(text, FIELDS)
         self.extras = extras
+        self._preset_loaded = ""
         self._apply_values(values, warnings)
         self._dirty_cache = None  # 载入后表单=服务，dirty 缓存失效待重算
+    # ---- 偏好落盘（统一处理失败，避免静默）----
+    def _persist(self, ok, err, what):
+        """配置写入失败的统一处理：每个会话只提示一次，绝不抛进 Tk 事件循环。
+
+        save_settings / save_presets 已约定返回 (ok, err) 而不抛异常（打包是
+        console=False，抛出去用户什么都看不到，只表现为「设置看着生效、
+        下次启动又变回去」）。这里把失败如实告知一次。
+        """
+        if ok:
+            return True
+        if not getattr(self, "_persist_warned", False):
+            self._persist_warned = True
+            try:
+                messagebox.showwarning(
+                    t("mb.hint"), fmt("msg.persist.fail", w=what, e=err), parent=self)
+            except Exception:  # noqa: BLE001 - 窗口销毁竞态
+                pass
+        return False
+
+    def _save_settings(self):
+        return self._persist(*save_settings(self.settings), what=t("settings.title"))
+
+    def _save_presets(self, presets):
+        return self._persist(*save_presets(presets), what=t("card.presets"))
 
     # ---- 预设 ----
     def refresh_presets(self):
+        """刷新下拉候选；**不**把「显示名」当成「已载入的预设」。
+
+        显示名只是「下次写回/另存会用的名字」。真正决定能否覆盖某个预设的是
+        self._preset_loaded（表单内容确实来自哪个预设）。二者混为一谈时，
+        启动自动选中 names[0] 会让表单（其实是服务参数）在点一次「应用更改」
+        后覆盖用户从未碰过的那个预设。
+        """
         names = list(load_presets().keys())
         self.cmb_preset.configure(values=names)
-        if names and self.preset_var.get() not in names:
+        if self._preset_loaded and self._preset_loaded not in names:
+            self._preset_loaded = ""      # 该预设已被删除/改名，表单不再对应它
+        if self._preset_loaded:
+            self.preset_var.set(self._preset_loaded)
+        elif names and self.preset_var.get() not in names:
             self.preset_var.set(names[0])
 
     def _sync_preset_with_form(self):
-        """应用成功后同步预设：若当前下拉是已存在的预设名，用刚写回服务的
-        表单覆盖该预设，保持「预设 = 服务当前参数」。
+        """应用成功后同步预设：仅当表单内容**确实来自**同名预设时才覆盖它。
 
         防漂移（用户改路径/参数后只点应用、忘记另存预设 → 旧预设残留旧
-        路径，下次载入会把服务指回坏文件）。新名字由 _on_preset_committed
-        的输入路径负责保存，这里不动；空名或未知名也不动。
+        路径，下次载入会把服务指回坏文件）。但若表单不是从该预设载入的
+        （启动自动选中、刚切过服务、预设刚被删），覆盖就是静默破坏用户数据，
+        此时不做任何写入。新名字由 _on_preset_committed 负责保存。
         """
         name = self.preset_var.get().strip()
-        if not name or name not in load_presets():
+        if not name or name != self._preset_loaded:
+            return
+        if name not in load_presets():
             return
         values, _ = self._collect()
         presets = load_presets()
         presets[name] = values
-        save_presets(presets)
+        self._save_presets(presets)
 
     def load_preset(self, name=None):
         """按名载入预设到表单（无弹窗）。"""
@@ -1663,6 +1762,7 @@ class ControlGUI(ctk.CTk):
             return
         # 即选即载：直接填表单，无弹窗
         self._apply_values(presets[name])
+        self._preset_loaded = name        # 表单内容现在确实来自该预设
         self._flash_preset_highlight()
 
     def on_preset_selected(self, name):
@@ -1673,7 +1773,7 @@ class ControlGUI(ctk.CTk):
             values, _ = self._collect()
             presets = load_presets()
             presets[cur_name] = values
-            save_presets(presets)
+            self._save_presets(presets)
         self.load_preset(name)
 
     def _on_preset_committed(self):
@@ -1682,11 +1782,13 @@ class ControlGUI(ctk.CTk):
         if not name:
             return
         if name in load_presets():
-            return  # 已有名（刚由下拉 command 载入），避免误覆盖
+            self._preset_loaded = name    # 已有名：表单仍对应该预设
+            return  # 刚由下拉 command 载入，避免误覆盖
         values, _ = self._collect()
         presets = load_presets()
         presets[name] = values
-        save_presets(presets)
+        self._save_presets(presets)
+        self._preset_loaded = name        # 另存后表单即对应该新预设
         self._flash_preset_highlight()
 
     def _flash_preset_highlight(self):
@@ -1718,7 +1820,11 @@ class ControlGUI(ctk.CTk):
             return
         presets = load_presets()
         presets.pop(name, None)
-        save_presets(presets)
+        self._save_presets(presets)
+        if self._preset_loaded == name:
+            # 表单里的值来自这个已删预设：此后不得再把它写回任何同名预设，
+            # 也不该让下拉的自动选中把它算成「当前对应的预设」。
+            self._preset_loaded = ""
         self.refresh_presets()
 
     def _collect(self):
@@ -1777,7 +1883,14 @@ class ControlGUI(ctk.CTk):
         self._flash_applied()
         # 写回成功后，当前下拉若对应已存在预设，同步覆盖该预设，防止表单改动
         # 只写回服务而预设仍留旧路径（下次载入会把服务指回坏文件）。
-        self._sync_preset_with_form()
+        #
+        # 预设写入是**可选的簿记**动作：它失败绝不能让随后的重启被跳过，
+        # 否则参数已落盘、界面已弹过确认，服务却仍在跑旧参数（真实故障形态：
+        # presets.json 被 OneDrive/杀软短暂占用）。失败只提示，务必继续往下走。
+        try:
+            self._sync_preset_with_form()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showwarning(t("mb.hint"), fmt("msg.preset.save.fail", e=exc))
         if state == "RUNNING":
             self.do_restart()
         else:
@@ -1830,23 +1943,35 @@ class ControlGUI(ctk.CTk):
             # 停止前健康检查（只提示，不阻断——重启本身就是修复手段）
             if not check_health(host, port)[0]:
                 self._log_q.put(t("log.restart.unhealthy"))
-            self._log_q.put(fmt("log.restart.stop", s=service))
-            ok, msg = sc_action("stop", service)
-            if not ok:
-                self._log_q.put(fmt("log.restart.stopfail", m=msg))
-                return
-            stopped = False
-            for _ in range(40):
-                if sc_query_state(service) == "STOPPED":
-                    stopped = True
-                    break
-                time.sleep(0.5)
-            if not stopped:
-                self._log_q.put(t("log.restart.stoptimeout"))
-                return
+            # 已停止的服务不必先停：Windows 的 `sc stop` 对未启动的服务返回
+            # 1062（The service has not been started，本机实测退出码 1062）。
+            # 旧实现把它当失败直接 return，于是服务停着时点「重启」永远只打印
+            # 一行「停止失败」，够不到下面的启动——而那正是用户最需要它的时候。
+            if sc_query_state(service) == "STOPPED":
+                self._log_q.put(fmt("log.restart.stop", s=service) + t("log.restart.alreadystopped"))
+            else:
+                self._log_q.put(fmt("log.restart.stop", s=service))
+                ok, msg = sc_action("stop", service)
+                if not ok and sc_query_state(service) != "STOPPED":
+                    self._log_q.put(fmt("log.restart.stopfail", m=msg))
+                    return
+                stopped = False
+                for _ in range(40):
+                    if sc_query_state(service) == "STOPPED":
+                        stopped = True
+                        break
+                    time.sleep(0.5)
+                if not stopped:
+                    self._log_q.put(t("log.restart.stoptimeout"))
+                    return
             self._log_q.put("__REFRESH_STATUS__")
             self._log_q.put(t("log.restart.start"))
-            sc_action("start", service)
+            ok, msg = sc_action("start", service)
+            if not ok:
+                # 启动命令本身失败也不再空等 60 秒：直接报错收尾
+                self._log_q.put(fmt("log.restart.startfail", m=msg))
+                self._log_q.put("__REFRESH_STATUS__")
+                return
             for _ in range(120):
                 if sc_query_state(service) == "RUNNING":
                     ok, d = check_health(host, port)
@@ -1962,7 +2087,11 @@ class ControlGUI(ctk.CTk):
             elif text == "__REFRESH_STATUS__":
                 self.refresh_status()
             elif isinstance(text, tuple) and text and text[0] == "__UPD_CHECK_DONE__":
-                self._check_updates_done(text[1], text[2], text[3], text[4])
+                self._check_updates_done(text[1], text[2], text[3], text[4],
+                                         text[5] if len(text) > 5 else None)
+            elif isinstance(text, tuple) and text and text[0] == "__UPD_BUILD__":
+                self._upd_build_pending = False
+                self._refresh_upd_status_label(("build", text[1]))
             elif isinstance(text, tuple) and text and text[0] == "__UPD_INSTALL_ERR__":
                 messagebox.showerror(t("upd.err.title"),
                                      fmt("upd.err", e=text[1]), parent=self)
@@ -2220,7 +2349,7 @@ class ControlGUI(ctk.CTk):
                 names = [s for s in svcs if isinstance(s, str)]
                 if names and names != self.settings.get("services", []):
                     self.settings["services"] = names
-                    save_settings(self.settings)
+                    self._save_settings()
                 if names:
                     self.cmb_service.configure(values=self._first_paint_services())
             except Exception:  # noqa: BLE001
@@ -2304,7 +2433,7 @@ class ControlGUI(ctk.CTk):
         try:
             self.settings["geometry"] = self.geometry()
             self.settings["last_preset"] = self.preset_var.get().strip()
-            save_settings(self.settings)
+            self._save_settings()
         except Exception:  # noqa: BLE001 - 设置保存失败不阻断退出
             pass
         # 等待重启收尾：保留窗口，_drain_log 在 __RESTART_DONE__ 后自动销毁
@@ -2411,7 +2540,7 @@ class ControlGUI(ctk.CTk):
             return
         self.settings["language"] = "zh" if shown == "中文" else "en"
         strings.set_lang(self.settings["language"])
-        save_settings(self.settings)
+        self._save_settings()
         self._restart_ui()
 
     def _change_appearance(self, mode, win=None):
@@ -2419,26 +2548,31 @@ class ControlGUI(ctk.CTk):
             self._restore_setting_widgets()   # 取消：下拉显示回滚到实际外观
             return
         self.settings["appearance"] = mode
-        save_settings(self.settings)
+        self._save_settings()
         self._restart_ui()
 
     def _restore_setting_widgets(self):
-        """把设置页语言/外观下拉的显示回滚到实际生效值（取消保护后调用）。"""
-        try:
-            var = getattr(self, "_lang_var", None)
-            if var is not None and var.winfo_exists():
-                var.set("中文" if strings._current == "zh" else "English")
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            var = getattr(self, "_appear_var", None)
-            if var is not None and var.winfo_exists():
-                cur = self.settings.get("appearance", "system")
-                names = {"system": t("appear.system"), "light": t("appear.light"),
-                         "dark": t("appear.dark")}
-                var.set(names.get(cur, t("appear.system")))
-        except Exception:  # noqa: BLE001
-            pass
+        """把设置页语言/外观下拉的显示回滚到实际生效值（取消保护后调用）。
+
+        _lang_var/_appear_var 是 tk.StringVar——**没有** winfo_exists()。旧实现
+        对它们调用 winfo_exists() 抛 AttributeError，被 except 吞掉，于是整个
+        回滚是死代码：用户点「取消」后下拉仍显示被拒的语言/外观，与实跑不符。
+        只对控件（有 winfo_exists 的）做存在性检查，变量直接 set。
+        """
+        for attr, value in (
+                ("_lang_var", "中文" if strings._current == "zh" else "English"),
+                ("_appear_var", {"system": t("appear.system"),
+                                 "light": t("appear.light"),
+                                 "dark": t("appear.dark")}.get(
+                                     self.settings.get("appearance", "system"),
+                                     t("appear.system")))):
+            var = getattr(self, attr, None)
+            if var is None:
+                continue
+            try:
+                var.set(value)
+            except Exception:  # noqa: BLE001 - 控件已销毁/变量失效
+                pass
 
     def _confirm_rebuild_dirty(self):
         """切换语言/外观前的未应用更改保护（_restart_ui 会重建界面并丢弃表单）。
@@ -2461,14 +2595,14 @@ class ControlGUI(ctk.CTk):
         values, _ = self._collect()
         presets = load_presets()
         presets[fmt("preset.autobackup", t=time.strftime('%m-%d %H:%M:%S'))] = values
-        save_presets(presets)
+        self._save_presets(presets)
         self.refresh_presets()
         return True
 
     def _change_motion(self):
         """动效开关回调：写设置并落盘，即时生效，不重启 UI。"""
         self.settings["motion_enabled"] = bool(self._motion_var.get())
-        save_settings(self.settings)
+        self._save_settings()
 
     # ---- 官方更新（llama.cpp） ----
     def _upd_channel(self):
@@ -2499,9 +2633,15 @@ class ControlGUI(ctk.CTk):
         self._prune_startup_after = None
 
         def _work():
-            for root in (UPD_DOWNLOAD_DIR, UPD_BACKUP_ROOT):
+            # downloads/{tag}/ 是「tag 目录里放文件」，backup/{tag}/{时间戳}/ 是
+            # 「tag 目录里再套时间戳目录」——后者必须逐 tag 下钻清理，否则同一
+            # tag 反复安装会让备份无限堆积（每次约 1.3GB）。
+            for root, nested in ((UPD_DOWNLOAD_DIR, False),
+                                 (UPD_BACKUP_ROOT, True)):
                 try:
-                    removed = updater.prune_old_subdirs(root, keep=self.PRUNE_KEEP)
+                    prune = (updater.prune_nested_subdirs if nested
+                             else updater.prune_old_subdirs)
+                    removed = prune(root, keep=self.PRUNE_KEEP)
                 except Exception:  # noqa: BLE001 - 清理失败绝不打扰用户
                     continue
                 if removed:
@@ -2523,13 +2663,13 @@ class ControlGUI(ctk.CTk):
         if channel not in updater.CHANNELS:
             channel = updater.DEFAULT_CHANNEL
         self.settings["upd_channel"] = channel
-        save_settings(self.settings)
+        self._save_settings()
         self._upd_release = None
         self._refresh_upd_status_label()
 
     def _change_upd_auto(self):
         self.settings["upd_check_on_startup"] = bool(self._upd_auto_var.get())
-        save_settings(self.settings)
+        self._save_settings()
 
     def _installed_build(self):
         """本地 build 号（查 llama-server.exe --version；异常返回 None）。"""
@@ -2539,23 +2679,47 @@ class ControlGUI(ctk.CTk):
             return None
 
     def _refresh_upd_status_label(self, status=None):
-        """更新设置页状态行；status 优先（'checking' / ('done', tag) / ('fail', msg)）。"""
+        """更新设置页状态行；status 优先（'checking' / ('done', tag) / ('fail', msg)）。
+
+        默认分支要读本地 build 号，而那是 spawn llama-server.exe --version
+        （冷盘/杀软扫描下可达数秒，实现里 timeout=20）。文件其它同步阻塞调用
+        都已被移进 worker，唯独这里在主线程——打开设置窗会白屏冻结。故默认
+        分支改为**先显示占位、再后台取版本**，拿到后经 _log_q 回主线程刷新。
+        """
         lbl = getattr(self, "_upd_status_lbl", None)
         if lbl is None or not lbl.winfo_exists():
             return
         if status == "checking":
-            text = t("upd.checking")
-        elif isinstance(status, tuple) and status and status[0] == "done":
-            text = fmt("upd.check.done", t=status[1])
-        elif isinstance(status, tuple) and status and status[0] == "fail":
-            text = fmt("upd.check.fail", e=status[1])
-        else:
-            b = self._installed_build()
-            if b is not None:
-                text = fmt("upd.status.now", b="b%d" % b)
-            else:
-                text = t("upd.status.unknown")
-        lbl.configure(text=text)
+            lbl.configure(text=t("upd.checking"))
+            return
+        if isinstance(status, tuple) and status and status[0] == "done":
+            lbl.configure(text=fmt("upd.check.done", t=status[1]))
+            return
+        if isinstance(status, tuple) and status and status[0] == "fail":
+            lbl.configure(text=fmt("upd.check.fail", e=status[1]))
+            return
+        if isinstance(status, tuple) and status and status[0] == "build":
+            b = status[1]
+            lbl.configure(text=fmt("upd.status.now", b="b%d" % b) if b is not None
+                          else t("upd.status.unknown"))
+            return
+        if self._upd_build_pending:
+            lbl.configure(text=t("upd.status.checking"))
+            return
+        self._upd_build_pending = True
+        lbl.configure(text=t("upd.status.checking"))
+
+        def _work():
+            b = self._installed_build()      # 阻塞调用只在 worker 里
+            try:
+                self._log_q.put(("__UPD_BUILD__", b))
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            threading.Thread(target=_work, daemon=True).start()
+        except Exception:  # noqa: BLE001 - 线程创建失败则保持占位文案
+            pass
 
     def _upd_assets_names(self):
         return [a.get("name") or "?" for a in (self._upd_release or {}).get("assets", [])]
@@ -2569,31 +2733,58 @@ class ControlGUI(ctk.CTk):
         """设置页「立即检查」：后台跑，完成后强制弹更新日志窗口。"""
         self._check_updates_worker(interactive=True)
 
+    def _upd_check_btn_set(self, state, text):
+        """设置「立即检查」按钮状态；控件已销毁时静默跳过。
+
+        getattr 拿到的是**引用**而非活性：语言/外观重建会销毁设置窗，而
+        _upd_check_btn 仍指向旧控件，直接 configure 会抛 TclError。该异常发生在
+        _upd_checking 置 True 之后，会把防重入标志永久卡在 True——此后所有更新
+        检查都在入口静默 return（表现为「检查按钮从此没反应」）。故必须不抛。
+        """
+        btn = getattr(self, "_upd_check_btn", None)
+        if btn is None:
+            return
+        try:
+            if not btn.winfo_exists():
+                return
+            btn.configure(state=state, text=text)
+        except Exception:  # noqa: BLE001 - 控件销毁竞态
+            pass
+
     def _check_updates_worker(self, interactive):
         """后台检查线程：worker 只碰 updater/网络，结果经 after 回主线程。"""
         if self._upd_checking:
             return
         self._upd_checking = True
         channel = self._upd_channel()
-        self._refresh_upd_status_label("checking")
-        if getattr(self, "_upd_check_btn", None) is not None:
-            self._upd_check_btn.configure(state="disabled", text=t("upd.checking"))
+        try:
+            self._refresh_upd_status_label("checking")
+            self._upd_check_btn_set("disabled", t("upd.checking"))
+        except Exception:  # noqa: BLE001 - 状态刷新失败不得阻断检查本身
+            pass
 
         def _work():
             err = None
             rel = None
+            cur = None
             try:
                 rel = updater.find_latest_release(channel)
             except Exception as exc:  # noqa: BLE001 - 网络/解析错误统一回传
                 err = str(exc)
+            if rel is not None:
+                # 本地 build 号也在 worker 里取：它是 spawn llama-server.exe
+                # --version，主线程绝不能做（冷盘/杀软下可达数秒）。
+                cur = self._installed_build()
             # Tk 的 after 只能从创建 Tcl 解释器的线程（主线程）调用；worker 线程
             # 一律经 _log_q 派发哨兵回主线程（项目内 NSSM 状态 worker 同模式）。
-            self._log_q.put(("__UPD_CHECK_DONE__", rel, err, interactive, channel))
+            self._log_q.put(("__UPD_CHECK_DONE__", rel, err, interactive,
+                             channel, cur))
 
         self._upd_worker = threading.Thread(target=_work, daemon=True)
         self._upd_worker.start()
 
-    def _check_updates_done(self, rel, err, interactive, checked_channel=None):
+    def _check_updates_done(self, rel, err, interactive, checked_channel=None,
+                            cur=None):
         try:
             alive = bool(self.winfo_exists())
         except Exception:  # noqa: BLE001
@@ -2601,9 +2792,7 @@ class ControlGUI(ctk.CTk):
         if not alive:
             return
         self._upd_checking = False
-        btn = getattr(self, "_upd_check_btn", None)
-        if btn is not None and btn.winfo_exists():
-            btn.configure(state="normal", text=t("upd.check"))
+        self._upd_check_btn_set("normal", t("upd.check"))
         # 用户在检查期间切换了二进制版本：丢弃过期结果
         if checked_channel is not None and checked_channel != self._upd_channel():
             self._refresh_upd_status_label()
@@ -2623,7 +2812,8 @@ class ControlGUI(ctk.CTk):
                                      parent=self)
             return
         self._upd_release = rel
-        cur = self._installed_build()
+        if cur is None:
+            cur = self._installed_build()   # 兼容旧的 4 元组调用（无 worker 预取）
         self._refresh_upd_status_label(("done", rel["tag"]))
         if cur is not None and rel.get("build") and rel["build"] <= cur:
             if interactive:
@@ -2722,12 +2912,18 @@ class ControlGUI(ctk.CTk):
                      justify="left", wraplength=620
                      ).pack(fill="x", padx=24, pady=(20, 10))
 
+        # 官方 nightly 发布**没有**更新说明（实测 release 页面 markdown-body 命中 0 处），
+        # 旧实现恒传空 body，于是这里永远显示「还未检查过更新」占位文案，用户
+        # 以为日志加载失败。改为如实说明「官方 nightly 不提供说明」并给出资产与
+        # 构建号，不再假装日志缺失是异常。
         ctk.CTkLabel(top, text=t("upd.changelog"), font=F_GROUP, text_color=C_MUT,
                      anchor="w").pack(fill="x", padx=24)
         frame = ctk.CTkFrame(top, fg_color=C_BG, border_width=1,
                              border_color=C_BORDER, corner_radius=8)
         frame.pack(fill="both", expand=True, padx=24, pady=(6, 10))
-        body = rel.get("body") or t("upd.status.none")
+        body = rel.get("body") or fmt(
+            "upd.no.changelog",
+            t=rel.get("tag") or "?", b=rel.get("build") or "?")
         txt = ctk.CTkTextbox(frame, font=F_SMALL, text_color=C_TXT,
                              fg_color=C_BG, border_width=0, wrap="word")
         txt.pack(fill="both", expand=True, padx=8, pady=8)

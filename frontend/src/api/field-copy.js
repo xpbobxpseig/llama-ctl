@@ -64,7 +64,7 @@ export const GROUP_LABEL = {
 }
 
 /**
- * The 29 fields in table order, with the metadata the widgets need.
+ * The 28 fields in table order, with the metadata the widgets need.
  *
  * `zh` is `Field::label` verbatim; `en` is Python's `label_en`. `unit` is
  * Python's slider unit, shown next to the readout.

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#18181B" stroke="#27272A" stroke-width="2" />
+
+  <!-- 抽象左耳 / 躯干后背括号 -->
+  <path d="M 104 62 L 80 110 L 80 190" fill="none" stroke="#A1A1AA" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- 抽象右耳 / 面部前导括号 -->
+  <path d="M 142 52 L 122 104 L 168 128 L 168 152 L 138 152 L 138 190" fill="none" stroke="#F4F4F5" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

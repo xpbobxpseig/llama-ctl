@@ -46,6 +46,8 @@ STRINGS = {
     "log.restart.unhealthy":{"zh": ">>> 当前未探活，继续重启", "en": ">>> Not healthy, restarting anyway"},
     "log.restart.stopfail":{"zh": ">>> 停止失败，已中止重启：{m}", "en": ">>> Stop failed, restart aborted: {m}"},
     "log.restart.stoptimeout":{"zh": ">>> 停止超时（40×0.5s 未 STOPPED），已中止重启", "en": ">>> Stop timed out, restart aborted"},
+    "log.restart.alreadystopped":{"zh": "（已是停止态，直接启动）", "en": " (already stopped; starting directly)"},
+    "log.restart.startfail":{"zh": ">>> 启动失败，已中止重启：{m}", "en": ">>> Start failed, restart aborted: {m}"},
     # ---- 状态 ----
     "status.svc":       {"zh": "服务 {st}", "en": "Svc {st}"},
     "status.health.ok": {"zh": "探活 OK · {d}", "en": "Health OK · {d}"},
@@ -92,6 +94,10 @@ STRINGS = {
     "msg.close.busy":   {"zh": "后台任务正在进行（重启或官方更新）。\n\n立即退出可能让服务停摆，或留下半更新状态的二进制文件。\n\n确定要强制退出吗？",
                          "en": "A background task is running (restart or official update).\n\nExiting now could leave the service down or the binaries half-updated.\n\nForce quit anyway?"},
     "msg.write.fail":   {"zh": "写回失败：{o}", "en": "Write failed: {o}"},
+    "msg.persist.fail": {"zh": "{w}未能保存到磁盘：{e}\n\n"
+                               "本次改动在关闭后会丢失，请检查该目录是否可写。",
+                         "en": "Could not save {w} to disk: {e}\n\n"
+                               "This change will be lost on exit; check that the directory is writable."},
     "msg.auto.fail":    {"zh": "开机自启设置失败：{o}", "en": "Auto-start change failed: {o}"},
     "msg.auto.confirm": {"zh": "将开机自启设为「{m}」？", "en": "Set auto-start to \"{m}\"?"},
     "msg.svc.dirty":    {"zh": "当前表单有未应用的更改，切换服务将丢失。是否先把当前表单自动备份为新预设再切换？",
@@ -112,6 +118,7 @@ STRINGS = {
       "upd.status.now":   {"zh": "当前：{b}", "en": "Installed: {b}"},
       "upd.status.unknown":{"zh": "当前版本未知（无法读取 llama-server.exe）",
                           "en": "Installed version unknown (llama-server.exe unreadable)"},
+      "upd.status.checking":{"zh": "正在读取当前版本…", "en": "Reading installed version…"},
       "upd.status.none":  {"zh": "还未检查过更新", "en": "Not checked yet"},
       "upd.checking":     {"zh": "正在检查官方最新版本…", "en": "Checking official releases…"},
       "upd.check.done":   {"zh": "最新：{t}", "en": "Latest: {t}"},
@@ -123,6 +130,14 @@ STRINGS = {
       "upd.prompt":       {"zh": "官方最新 b{n}（当前 b{c}）。是否查看更新日志并更新？",
                           "en": "Official latest b{n} (installed b{c}). Review the changelog and update?"},
       "upd.changelog":    {"zh": "更新日志", "en": "Changelog"},
+      "upd.no.changelog": {"zh": "官方 nightly 构建不提供更新说明。\n\n"
+                                  "本次更新：{t}（build {b}）\n\n"
+                                  "将下载并替换下面列出的文件；旧文件会先备份，"
+                                  "任一步失败自动回滚。",
+                           "en": "Official nightly builds ship no release notes.\n\n"
+                                 "This update: {t} (build {b})\n\n"
+                                 "The files listed below will be downloaded and replaced; "
+                                 "existing files are backed up first and any failure rolls back."},
       "upd.assets":       {"zh": "下载内容：{a}", "en": "Will download: {a}"},
       "upd.install":      {"zh": "立即更新", "en": "Install now"},
       "upd.install.confirm":{"zh": "将停止服务「{s}」并替换 llama.cpp 二进制。旧文件会备份到 {d}。\n\n继续？",
@@ -144,7 +159,11 @@ STRINGS = {
                            "en": "No files to replace (package does not match target directory)"},
       "upd.not.running":  {"zh": "更新后服务 {s} 未进入 RUNNING，已回滚旧文件",
                            "en": "Service {s} did not reach RUNNING after update; previous files restored"},
+      "upd.wait.running": {"zh": "等待服务进入 RUNNING…（已 {s} 秒）",
+                           "en": "Waiting for the service to reach RUNNING… ({s}s)"},
       "upd.starting":     {"zh": "重启服务 {s}…", "en": "Restarting service {s}…"},
+      "upd.start.fail":   {"zh": "启动服务失败：{m}（已回滚旧文件并尝试恢复服务）",
+                           "en": "Failed to start the service: {m} (previous files rolled back; recovery attempted)"},
       "upd.done":         {"zh": "更新完成：{s} 已重启，当前 b{b}。", "en": "Update complete: {s} restarted, now b{b}."},
       "upd.err":          {"zh": "更新失败：{e}", "en": "Update failed: {e}"},
       "upd.err.title":    {"zh": "更新失败", "en": "Update failed"},
@@ -152,6 +171,11 @@ STRINGS = {
                           "en": "No matching official asset found. Check the build variant setting."},
       "upd.prune":        {"zh": "已清理 {n} 个陈旧目录：{d}",
                           "en": "Pruned {n} stale directories: {d}"},
+      "msg.preset.save.fail": {"zh": "参数已写回服务，但预设未能保存：{e}\n\n"
+                                    "（服务参数不受影响，重启将继续进行）",
+                              "en": "Parameters were written to the service, but the preset "
+                                    "could not be saved: {e}\n\n(Service parameters are "
+                                    "unaffected; the restart will continue)"},
       "upd.cache.bad":    {"zh": "缓存已损坏，正在删除并重新下载：{n}",
                           "en": "Cached file is corrupt; deleting and re-downloading: {n}"},
       "upd.cache.del.fail":{"zh": "无法删除损坏的缓存 {n}：{e}。请手动删除该文件后重试。",

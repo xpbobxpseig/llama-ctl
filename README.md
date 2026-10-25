@@ -19,7 +19,7 @@
 - 参数预设（本地保存 / 加载 / 删除 / 自动备份），跨服务复用
 - 官方 llama.cpp 更新：检查 / 下载 / 备份 / 替换 / 回滚，全程需确认
 - 启动时后台清理官方更新的陈旧下载与备份（各保留最近 3 个），无确认、不打扰
-- 动效与主题：Apple 风浅 / 深双主题、状态呼吸圆点（30s 无交互自动静止）、按钮驻留高亮 + 0.8s 指数渐隐、`?` 提示框淡入渐隐、可折叠参数分组、动效总开关
+- 动效与主题：原生「精密仪器」风浅 / 深双主题（Segoe UI Variable + 单一森林绿交互色 + 发丝线分层，见 `docs/ui-redesign-v6.md`）、按钮驻留渐隐、视图 / 弹层入场动效、动效总开关（关闭后所有动画直跳终态）
 - 界面骨架文案中英双语（参数详解保持中文）
 
 ### 环境要求
@@ -37,19 +37,19 @@
 
 **方式二：从源码构建并运行**
 
-桌面端是 **Tauri 2 + Vue 3** 应用（`src-tauri\` + `frontend\`），构建入口是 `cargo tauri`：
+桌面端是 **Tauri 2 + Vue 3** 应用（`src-tauri\` + `frontend\`），构建入口是根目录的 `build.ps1`：
 
 ```
 cd frontend
 npm install
-npm run build          # 产出 frontend\dist，即 tauri.conf.json 的 frontendDist
-
-cd ..\src-tauri
+cd ..
+cd src-tauri
 cargo tauri dev        # 开发模式：自动起 Vite dev server（devUrl http://localhost:5173）
-cargo tauri build      # 打包：产出 NSIS 安装包（bundle.targets = ["nsis"]）
+cd ..
+.\build.ps1            # 打包：根目录产出 llama-ctl.exe + NSIS 安装包
 ```
 
-> 需要先 `cargo install tauri-cli --version "^2"`；本机尚未安装（`cargo tauri --version` 报 no such command），因此上述命令本节未实际跑通验证。
+> 需要先 `cargo install tauri-cli --version "^2"`。本机已验证 `cargo tauri --version` 为 2.12.3；`build.ps1` 会负责前端构建、Rust 打包和根目录复制。
 
 ### 环境变量（可选）
 
@@ -124,20 +124,28 @@ NSSM 输出为 UTF-16LE（`sc` 为本地代码页 GBK）。工具按字节特征
 
 「应用更改」按钮本身仍按**文本**比较决定是否提示「无变化」：写回是规范化服务参数的动作。
 
-### 构建
+### 构建（exe 输出到根目录）
 
-```
-cd frontend && npm install && npm run build
-cd ..\src-tauri && cargo tauri build
+前置：Node/npm、Rust，以及 `cargo install tauri-cli --version "^2"`。
+
+```powershell
+.\build.ps1
 ```
 
-`cargo tauri build` 会先跑 `beforeBuildCommand`（`npm run build`）再编译 Rust，并按 `src-tauri\tauri.conf.json` 的 `bundle.targets = ["nsis"]` 产出 NSIS 安装包（简体中文 + 英文语言选择，`installMode: both`）。产物落在 `src-tauri\target\release\bundle\nsis\`。
+脚本会：
+
+1. 在 `src-tauri` 运行 `cargo tauri build --ci`；`beforeBuildCommand` 自动构建 `frontend/dist`。
+2. 校验新的 `src-tauri\target\release\llama-ctl.exe` 和 NSIS 安装包。
+3. 复制到项目根目录并校验非空：
+   - `llama-ctl.exe` — 便携版应用
+   - `llama-ctl_<version>_x64-setup.exe` — NSIS 安装包（推荐分发）
+4. 打印文件名、大小、时间和绝对路径。
+
+Tauri 的中间产物仍在 `src-tauri\target\release`；根目录这两个 exe 是交付入口。构建前请关闭正在运行的 `llama-ctl.exe`，否则 Windows 会锁定待替换的二进制。
 
 开发模式用 `cargo tauri dev`：它会先跑 `beforeDevCommand`（`npm run dev`）起 Vite（默认 `http://localhost:5173`，即 `devUrl`）。
 
-先决条件：`cargo install tauri-cli --version "^2"`。
-
-> **本机构建状态**：`cargo tauri` 未安装（`cargo tauri --version` 报 no such command），所以上述构建命令**尚未在本机实际跑通**，产物路径是按 `tauri.conf.json` 推导的、未经实测。本机 `src-tauri\target\` 下目前只有 debug 产物，没有 NSIS 包。
+> 本机已验证：`cargo tauri --version` = 2.12.3，`.\build.ps1` 成功产出上述两个根目录文件。
 
 ### 测试
 
@@ -177,7 +185,7 @@ A general-purpose Windows GUI that directly drives **any** llama.cpp service man
 - Parameter presets (local save / load / delete / auto-backup), reusable across services
 - Official llama.cpp updates: check / download / back up / replace / roll back, with confirmation at every step
 - Background cleanup of stale update downloads and backups on startup (keeps the latest 3 of each), silent and non-blocking
-- Motion and theme: Apple-style light / dark themes, breathing status dot (freezes after 30s idle), button hover highlight with 0.8s exponential fade, `?` tooltip fade-in / fade-out, collapsible parameter groups, global motion switch
+- Motion and theme: a native "precision instrument" light / dark theme (Segoe UI Variable, a single forest-green interaction hue, hairline layering — see `docs/ui-redesign-v6.md`), button hover fades, view / dialog entrance motion, and a global motion switch (off = every animation jumps to its end state)
 - Bilingual UI chrome in Chinese and English (parameter guides stay Chinese)
 
 ### Requirements
@@ -195,19 +203,19 @@ A general-purpose Windows GUI that directly drives **any** llama.cpp service man
 
 **Option 2: build and run from source**
 
-The desktop app is **Tauri 2 + Vue 3** (`src-tauri\` + `frontend\`); the build entry point is `cargo tauri`:
+The desktop app is **Tauri 2 + Vue 3** (`src-tauri\` + `frontend\`); the build entry point is `build.ps1` at the repository root:
 
 ```
 cd frontend
 npm install
-npm run build          # emits frontend\dist, i.e. frontendDist in tauri.conf.json
-
-cd ..\src-tauri
+cd ..
+cd src-tauri
 cargo tauri dev        # dev mode: starts the Vite dev server (devUrl http://localhost:5173)
-cargo tauri build      # package: emits an NSIS installer (bundle.targets = ["nsis"])
+cd ..
+.\build.ps1            # package: writes llama-ctl.exe + NSIS installer to the repository root
 ```
 
-> Requires `cargo install tauri-cli --version "^2"` first; it is not installed on this machine (`cargo tauri --version` reports "no such command"), so the commands above have not actually been run and verified here.
+> Requires `cargo install tauri-cli --version "^2"`. On this machine `cargo tauri --version` is 2.12.3; `build.ps1` handles the frontend build, Rust packaging and root copy.
 
 ### Environment variables (optional)
 
@@ -282,20 +290,28 @@ The "unapplied changes" hint and the "Revert" button's availability are decided 
 
 The "Apply changes" button itself still compares **textually** when deciding whether to warn "no change", because writing back normalizes the service parameters.
 
-### Build
+### Build (exe output in the repository root)
 
-```
-cd frontend && npm install && npm run build
-cd ..\src-tauri && cargo tauri build
+Prerequisites: Node/npm, Rust, and `cargo install tauri-cli --version "^2"`.
+
+```powershell
+.\build.ps1
 ```
 
-`cargo tauri build` runs `beforeBuildCommand` (`npm run build`) first, then compiles Rust, and emits an NSIS installer per `bundle.targets = ["nsis"]` in `src-tauri\tauri.conf.json` (Simplified Chinese + English language selector, `installMode: both`). Output lands in `src-tauri\target\release\bundle\nsis\`.
+The script:
+
+1. Runs `cargo tauri build --ci` in `src-tauri`; `beforeBuildCommand` builds `frontend/dist` automatically.
+2. Verifies the new `src-tauri\target\release\llama-ctl.exe` and NSIS setup.
+3. Copies both to the repository root and checks they are non-empty:
+   - `llama-ctl.exe` — portable app
+   - `llama-ctl_<version>_x64-setup.exe` — NSIS installer (recommended for distribution)
+4. Prints name, size, timestamp and absolute paths.
+
+Tauri intermediates stay under `src-tauri\target\release`; the two root exes are the supported deliverables. Close any running `llama-ctl.exe` before building, otherwise Windows locks the binary being replaced.
 
 For development, `cargo tauri dev` runs `beforeDevCommand` (`npm run dev`) and starts Vite (`http://localhost:5173`, the configured `devUrl`).
 
-Prerequisite: `cargo install tauri-cli --version "^2"`.
-
-> **Status on this machine**: `cargo tauri` is not installed (`cargo tauri --version` reports "no such command"), so these build commands have **not actually been run here**; the output path is derived from `tauri.conf.json` and is unverified. `src-tauri\target\` currently holds only debug artifacts — there is no NSIS bundle.
+> Verified on this machine: `cargo tauri --version` is 2.12.3, and `.\build.ps1` produced both root deliverables.
 
 ### Test
 

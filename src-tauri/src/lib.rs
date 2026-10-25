@@ -38,10 +38,29 @@ pub fn run() {
     let app = App::new(&deps, env(), install_env());
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(commands::DepsHandle::new())
         .manage(commands::AppState::new(app))
         .invoke_handler(commands::handlers())
         .setup(|app| {
+            // 材质在首帧之前对齐：Acrylic 的明暗底色跟窗口主题标志走，浅色页
+            // 必须显式设浅色主题，否则罩在系统深色模式的材质上会整体发灰；
+            // 关掉半透明材质时摘掉窗口特效。
+            {
+                let window = app.get_webview_window("main");
+                if let Some(w) = window {
+                    let s = llama_ctl_core::persist::load_settings(&RealDeps::new(), &env());
+                    let theme = match s.appearance.as_str() {
+                        "light" => Some(tauri::Theme::Light),
+                        "dark" => Some(tauri::Theme::Dark),
+                        _ => None,
+                    };
+                    let _ = w.set_theme(theme);
+                    if !s.mica_enabled {
+                        let _ = w.set_effects(None);
+                    }
+                }
+            }
             // Enumerating services costs one powershell call (~0.6 s) and the
             // startup cleanup walks directory trees, so both run on a worker
             // once the window is up rather than during setup.

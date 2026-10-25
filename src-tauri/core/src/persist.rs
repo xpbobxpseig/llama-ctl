@@ -129,6 +129,8 @@ pub struct Settings {
     pub last_preset: String,
     /// Master animation switch (design-guide §5: off = jump straight to end).
     pub motion_enabled: bool,
+    /// Translucent window material (Mica); off = opaque surfaces.
+    pub mica_enabled: bool,
     /// Check upstream releases on startup; only ever *notifies*.
     pub upd_check_on_startup: bool,
     /// Official binary variant, a key of `updater::channels()`.
@@ -145,6 +147,7 @@ impl Default for Settings {
             geometry: None,
             last_preset: String::new(),
             motion_enabled: true,
+            mica_enabled: true,
             upd_check_on_startup: true,
             upd_channel: DEFAULT_CHANNEL.to_string(),
             services: Vec::new(),
@@ -178,6 +181,9 @@ pub fn load_settings(d: &impl Deps, env: &Env) -> Settings {
     if let Some(v) = map.get("motion_enabled").and_then(Value::as_bool) {
         out.motion_enabled = v;
     }
+    if let Some(v) = map.get("mica_enabled").and_then(Value::as_bool) {
+        out.mica_enabled = v;
+    }
     if let Some(v) = map.get("upd_check_on_startup").and_then(Value::as_bool) {
         out.upd_check_on_startup = v;
     }
@@ -206,6 +212,7 @@ pub fn save_settings(d: &impl Deps, env: &Env, settings: &Settings) -> Result<()
     );
     map.insert("last_preset".to_string(), Value::String(settings.last_preset.clone()));
     map.insert("motion_enabled".to_string(), Value::Bool(settings.motion_enabled));
+    map.insert("mica_enabled".to_string(), Value::Bool(settings.mica_enabled));
     map.insert("upd_check_on_startup".to_string(), Value::Bool(settings.upd_check_on_startup));
     map.insert("upd_channel".to_string(), Value::String(settings.upd_channel.clone()));
     map.insert(

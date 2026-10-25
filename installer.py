@@ -185,12 +185,24 @@ def install(rel, service, target, bak, sink, download_dir, deps=None):
 
     # 5) 重启服务并等待 RUNNING；未恢复 RUNNING 则回滚旧文件
     sink(fmt("upd.starting", s=service))
-    deps.action("start", service)
+    try:
+        deps.action("start", service)
+    except Exception as exc:  # noqa: BLE001 - 启动命令本身异常也必须走回滚+收尾
+        # 此时二进制已替换、服务已停止：不回滚就会留下「停摆 + 半更新」的服务。
+        sink(fmt("upd.start.fail", m=exc))
+        rollback_files(replaced, target, bak, sink, deps)
+        remove_added_files(added, target, sink, deps)
+        _try_restart_service(service, sink, deps)
+        raise UpdateError(fmt("upd.start.fail", m=exc)) from exc
     running = False
-    for _ in range(120):
+    for tick in range(120):
         if deps.query_state(service) == "RUNNING":
             running = True
             break
+        # 静默等待会让用户以为卡死：每约 6 秒报一次进度（此前 120 次循环
+        # 全程无输出，且弹窗已关、按钮已灰，用户无法区分「在等」与「挂了」）。
+        if tick and tick % 12 == 0:
+            sink(fmt("upd.wait.running", s=int(tick * 0.5)))
         time.sleep(0.5)
     if not running:
         sink(fmt("upd.not.running", s=service))
@@ -225,13 +237,18 @@ def remove_added_files(names, target, sink, deps):
 
 
 def _try_restart_service(service, sink, deps):
-    """更新失败收尾：若服务处于 STOPPED，尽力重启（线程安全）。"""
+    """更新失败收尾：若服务处于 STOPPED，尽力重启（线程安全）。
+
+    这是**尽力而为**的恢复，不是主流程：上限 20 秒即收手，不再叠加 60 秒。
+    原先与主等待同为 120×0.5s，失败路径合计静默 2 分钟（主等待 60s +
+    收尾 60s），是用户明确反馈过的「看着像挂了」。
+    """
     try:
         if deps.query_state(service) != "STOPPED":
             return
         sink(fmt("upd.starting", s=service))
         deps.action("start", service)
-        for _ in range(120):
+        for _ in range(40):
             if deps.query_state(service) == "RUNNING":
                 break
             time.sleep(0.5)

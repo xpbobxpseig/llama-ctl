@@ -1,4 +1,7 @@
 fn main() {
+    // tauri-build does not track the icon file: without this, a replaced icon
+    // keeps embedding the stale compiled .res forever (the bug this fixed).
+    println!("cargo:rerun-if-changed=icons/llama_icon.ico");
     // `requireAdministrator` comes from ADR-0001: nearly every operation here
     // (`nssm set`, `sc start|stop`, replacing llama.cpp binaries) needs it, and
     // one UAC prompt at startup is better than dozens. The consequence the ADR

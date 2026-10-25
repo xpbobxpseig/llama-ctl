@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llama.cpp 服务控制台 · 视觉 mockup</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --font-display: "Segoe UI Variable Display", "Microsoft YaHei UI", sans-serif;
+      --font-body: "Segoe UI Variable Text", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+      --font-mono: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+      --stage: oklch(93.6% 0.006 285);
+      --stage-ink: oklch(25% 0.012 285);
+      --stage-muted: oklch(43% 0.01 285);
+      --stage-line: oklch(68% 0.008 285);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { background: var(--stage); }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--stage-ink);
+      background: var(--stage);
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: 0;
+    }
+
+    button, input, select { font: inherit; }
+    button, select, input[type="checkbox"], input[type="range"] { cursor: pointer; }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .mockup-page {
+      width: min(100%, 2400px);
+      margin: 0 auto;
+      padding: 32px;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .page-header h1 {
+      margin: 0;
+      color: var(--stage-ink);
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    .page-header p {
+      max-width: 56ch;
+      margin: 4px 0 0;
+      color: var(--stage-muted);
+      font-size: 13px;
+    }
+
+    .page-kicker {
+      flex: none;
+      color: var(--stage-muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: .02em;
+    }
+
+    .mockup-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 32px;
+      align-items: start;
+    }
+
+    .panel-shell { min-width: 0; }
+
+    .panel-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 8px;
+      color: var(--stage-ink);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+
+    .panel-label::before {
+      width: 16px;
+      height: 1px;
+      background: var(--stage-line);
+      content: "";
+    }
+
+    .window-viewport {
+      width: 100%;
+      overflow: hidden;
+      border: 1px solid oklch(83% 0.008 285);
+      border-radius: 8px;
+      background: oklch(89% 0.008 285);
+    }
+
+    .main-viewport { aspect-ratio: 1040 / 880; }
+    .settings-viewport { aspect-ratio: 600 / 640; }
+
+    .window-scale {
+      position: relative;
+      width: var(--logical-width);
+      height: var(--logical-height);
+      transform: scale(var(--scale));
+      transform-origin: top left;
+    }
+
+    .main-viewport .window-scale {
+      --logical-width: 1040px;
+      --logical-height: 880px;
+      --scale: calc((min(100vw - 96px, 2304px) / 2) / 1040);
+    }
+
+    .settings-viewport .window-scale {
+      --logical-width: 600px;
+      --logical-height: 640px;
+      --scale: calc((min(100vw - 96px, 2304px) / 2) / 600);
+    }
+
+    .theme-light {
+      --page: #f4f4f6;
+      --surface: #ffffff;
+      --surface-2: #f7f7f9;
+      --border: #e6e6ea;
+      --border-strong: #d6d6dc;
+      --ink: #18181b;
+      --ink-2: #52525b;
+      --ink-3: #5f5f66;
+      --accent: #0b5cb0;
+      --accent-fill: #0a6fd6;
+      --accent-soft: #e8f2fe;
+      --ok: #0f7b3d;
+      --ok-soft: #e6f6ec;
+      --warn: #9a5b00;
+      --warn-soft: #fdf1de;
+      --err: #c2261c;
+      --err-soft: #fdecea;
+    }
+
+    .theme-dark {
+      --page: #121214;
+      --surface: #1c1c1f;
+      --surface-2: #26262a;
+      --border: #313136;
+      --border-strong: #43434a;
+      --ink: #f4f4f5;
+      --ink-2: #b4b4bd;
+      --ink-3: #8e8e97;
+      --accent: #4da3ff;
+      --accent-fill: #0a6fd6;
+      --accent-soft: #12293f;
+      --ok: #4ade80;
+      --ok-soft: #10291b;
+      --warn: #fbbf24;
+      --warn-soft: #33260c;
+      --err: #ff6b61;
+      --err-soft: #3a1a17;
+    }
+
+    .app-window {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      color: var(--ink);
+      background: var(--page);
+      font-family: var(--font-body);
+      letter-spacing: 0;
+    }
+
+    .main-window { padding-bottom: 24px; }
+
+    .app-header {
+      display: flex;
+      height: 56px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .app-title h2 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .app-title span {
+      display: block;
+      margin-top: 4px;
+      color: var(--ink-3);
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .service-select {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .service-select label {
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 550;
+    }
+
+    .service-select select { width: 240px; }
+
+    .main-content {
+      display: grid;
+      gap: 12px;
+      padding: 24px;
+    }
+
+    .card {
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+
+    .status-card {
+      height: 76px;
+      padding: 8px 16px;
+    }
+
+    .status-row {
+      display: flex;
+      height: 30px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .service-status,
+    .auto-start,
+    .status-actions {
+      display: flex;
+      align-items: center;
+    }
+
+    .service-status { gap: 8px; }
+    .status-actions { gap: 8px; }
+    .auto-start { gap: 8px; }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--ok);
+      outline: 4px solid var(--ok-soft);
+    }
+
+    .service-status strong {
+      font-size: 15px;
+      font-weight: 550;
+    }
+
+    .health {
+      margin-right: 174px;
+      color: var(--ink-3);
+      font-size: 13px;
+    }
+
+    .warning-pill {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      display: inline-flex;
+      height: 24px;
+      align-items: center;
+      padding: 0 8px;
+      border-radius: 6px;
+      color: var(--warn);
+      background: var(--warn-soft);
+      font-size: 12px;
+      font-weight: 550;
+      white-space: nowrap;
+    }
+
+    .switch {
+      position: relative;
+      width: 32px;
+      height: 18px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent-fill);
+    }
+
+    .switch::after {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ffffff;
+      content: "";
+    }
+
+    .auto-start-label {
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 550;
+    }
+
+    .auto-state {
+      color: var(--ink-3);
+      font-size: 12px;
+    }
+
+    .button {
+      display: inline-flex;
+      min-width: 64px;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 0 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface);
+      font-size: 13px;
+      font-weight: 550;
+      letter-spacing: .02em;
+    }
+
+    .button:hover { background: var(--surface-2); }
+    .button:active { transform: translateY(1px); }
+
+    .button-primary {
+      border-color: var(--accent-fill);
+      color: #ffffff;
+      background: var(--accent-fill);
+    }
+
+    .button-primary:hover {
+      border-color: oklch(from var(--accent-fill) calc(l - .06) c h);
+      color: #ffffff;
+      background: oklch(from var(--accent-fill) calc(l - .06) c h);
+    }
+
+    .icon-button {
+      width: 32px;
+      min-width: 32px;
+      padding: 0;
+    }
+
+    .icon-button svg,
+    .trash-button svg,
+    .chevron svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.7;
+    }
+
+    .preset-card {
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr) 32px;
+      height: 48px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 12px 0 16px;
+    }
+
+    .eyebrow {
+      color: var(--ink-3);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .input,
+    .select {
+      width: 100%;
+      height: 32px;
+      padding: 0 8px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface-2);
+      outline: none;
+    }
+
+    .input:hover,
+    .select:hover { border-color: var(--ink-3); }
+
+    .input:focus,
+    .select:focus {
+      border-color: var(--accent);
+      background: var(--surface);
+    }
+
+    .trash-button {
+      display: inline-grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 0;
+      border-radius: 8px;
+      color: var(--ink-3);
+      background: transparent;
+    }
+
+    .trash-button:hover {
+      color: var(--err);
+      background: var(--err-soft);
+    }
+
+    .parameters-card { overflow: hidden; }
+
+    .variant-collapsed .parameters-card { height: 568px; }
+    .variant-expanded .parameters-card { height: 396px; }
+
+    .card-header {
+      display: flex;
+      height: 48px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-header h3 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .inline-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .text-button {
+      height: 32px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 8px;
+      color: var(--ink-2);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 550;
+    }
+
+    .text-button:hover {
+      color: var(--ink);
+      background: var(--surface-2);
+    }
+
+    .apply-link {
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .apply-link:hover {
+      color: var(--accent);
+      background: var(--accent-soft);
+      outline: 1px solid var(--accent);
+      outline-offset: -1px;
+    }
+
+    .accordion-list {
+      height: calc(100% - 48px);
+      overflow-y: auto;
+      padding: 4px 16px;
+      scrollbar-color: var(--border-strong) transparent;
+      scrollbar-width: thin;
+    }
+
+    .accordion-group + .accordion-group { border-top: 1px solid var(--border); }
+
+    .accordion-head {
+      display: flex;
+      width: 100%;
+      height: 36px;
+      align-items: center;
+      gap: 8px;
+      padding: 0;
+      border: 0;
+      color: var(--ink-2);
+      background: transparent;
+      text-align: left;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .accordion-head:hover { color: var(--ink); }
+    .accordion-group.open .accordion-head { color: var(--accent); }
+
+    .chevron {
+      display: inline-grid;
+      width: 16px;
+      height: 16px;
+      place-items: center;
+      transition: transform 160ms ease;
+    }
+
+    .accordion-group.open .chevron { transform: rotate(90deg); }
+
+    .count-badge {
+      display: inline-flex;
+      min-width: 20px;
+      height: 18px;
+      align-items: center;
+      justify-content: center;
+      padding: 0 8px;
+      border-radius: 6px;
+      color: var(--ink-3);
+      background: var(--surface-2);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .parameter-rows {
+      display: grid;
+      gap: 4px;
+      padding: 0 0 8px;
+    }
+
+    .parameter-row {
+      display: grid;
+      grid-template-columns: 26px 200px minmax(0, 1fr) 88px;
+      min-height: 32px;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .help {
+      display: inline-grid;
+      width: 20px;
+      height: 20px;
+      place-items: center;
+      border: 1px solid var(--border-strong);
+      border-radius: 50%;
+      color: var(--ink-3);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .param-label {
+      overflow: hidden;
+      color: var(--ink-2);
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .path-control {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 64px;
+      gap: 8px;
+    }
+
+    .short-control { width: 220px; }
+
+    .param-value {
+      color: var(--ink-2);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .range-control {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: center;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 20px;
+      margin: 0;
+      accent-color: var(--accent-fill);
+    }
+
+    .log-card { overflow: hidden; }
+
+    .log-card.collapsed { height: 48px; }
+    .log-card.expanded { height: 220px; }
+
+    .log-head {
+      display: flex;
+      height: 48px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+    }
+
+    .log-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .log-title .chevron { transform: rotate(90deg); }
+    .collapsed .log-title .chevron { transform: rotate(0); }
+
+    .log-lines {
+      height: 156px;
+      margin: 0 16px 16px;
+      overflow: hidden;
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: var(--ink-2);
+      background: var(--surface-2);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .log-line {
+      display: flex;
+      gap: 12px;
+      white-space: nowrap;
+    }
+
+    .log-time { color: var(--ink-3); }
+
+    .log-line.warn-line {
+      margin: 0 -4px;
+      padding: 0 4px;
+      border-radius: 6px;
+      color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .settings-stage {
+      display: grid;
+      place-items: center;
+      background: var(--page);
+    }
+
+    .settings-dialog {
+      width: 552px;
+      height: 568px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, .14), 0 2px 8px rgba(0, 0, 0, .08);
+    }
+
+    .theme-dark .settings-dialog {
+      box-shadow: 0 20px 52px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .24);
+    }
+
+    .dialog-header {
+      display: flex;
+      height: 64px;
+      align-items: center;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dialog-header h2 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .settings-section {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      min-height: 76px;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .settings-section.update-section {
+      min-height: 200px;
+      align-items: start;
+    }
+
+    .section-label {
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .settings-controls {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .checkbox-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .checkbox-row input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--accent-fill);
+    }
+
+    .update-status {
+      color: var(--ink-3);
+      font-size: 12px;
+    }
+
+    .dialog-footer {
+      display: flex;
+      height: 76px;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 0 24px;
+    }
+
+    @media (max-width: 1120px) {
+      .mockup-page { padding: 24px; }
+      .mockup-grid { grid-template-columns: 1fr; gap: 24px; }
+      .main-viewport .window-scale { --scale: calc((100vw - 48px) / 1040); }
+      .settings-viewport .window-scale { --scale: calc((100vw - 48px) / 600); }
+    }
+
+    @media (max-width: 600px) {
+      .mockup-page { padding: 16px; }
+      .page-header { align-items: flex-start; margin-bottom: 16px; }
+      .page-header p, .page-kicker { display: none; }
+      .page-header h1 { font-size: 20px; }
+      .mockup-grid { gap: 16px; }
+      .main-viewport .window-scale { --scale: calc((100vw - 32px) / 1040); }
+      .settings-viewport .window-scale { --scale: calc((100vw - 32px) / 600); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="mockup-page" data-od-id="mockup-page">
+    <header class="page-header" data-od-id="page-header">
+      <div>
+        <h1 data-od-id="page-title">llama.cpp 服务控制台</h1>
+        <p>Windows 桌面工具视觉稿 · 四种窗口状态并排审阅</p>
+      </div>
+      <span class="page-kicker">客户端审批稿</span>
+    </header>
+
+    <section class="mockup-grid" data-od-id="panel-grid">
+      <article class="panel-shell" data-od-id="main-light-panel">
+        <h2 class="panel-label">主界面 · 浅色</h2>
+        <div class="window-viewport main-viewport">
+          <div class="window-scale">
+            <section class="app-window main-window theme-light variant-collapsed" data-od-id="main-window-light">
+              <header class="app-header" data-od-id="main-header-light">
+                <div class="app-title">
+                  <h2>llama.cpp 服务控制台</h2>
+                  <span>QwenLLM</span>
+                </div>
+                <div class="service-select">
+                  <label for="service-light">服务</label>
+                  <select id="service-light" class="select" aria-label="服务">
+                    <option>QwenLLM</option>
+                  </select>
+                </div>
+              </header>
+
+              <div class="main-content">
+                <section class="card status-card" data-od-id="status-card-light">
+                  <div class="warning-pill">● 有未应用的更改</div>
+                  <div class="status-row">
+                    <div class="service-status"><span class="status-dot"></span><strong>服务 RUNNING</strong></div>
+                    <span class="health">探活 OK · 42ms</span>
+                  </div>
+                  <div class="status-row">
+                    <div class="auto-start">
+                      <button class="switch" type="button" role="switch" aria-checked="true" aria-label="开机自启"></button>
+                      <span class="auto-start-label">开机自启</span><span class="auto-state">自动(开机)</span>
+                    </div>
+                    <div class="status-actions">
+                      <button class="button button-primary" type="button" data-od-id="start-button-light">启动</button>
+                      <button class="button" type="button">停止</button>
+                      <button class="button" type="button">重启</button>
+                      <button class="button icon-button" type="button" aria-label="服务设置" title="服务设置">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="card preset-card" data-od-id="preset-card-light">
+                  <span class="eyebrow">参数预设</span>
+                  <input class="input" list="presets-light" value="qwen3.8_Crack" aria-label="参数预设名称">
+                  <datalist id="presets-light"><option value="qwen3.8_Crack"></option></datalist>
+                  <button class="trash-button" type="button" aria-label="删除参数预设" title="删除参数预设">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+                  </button>
+                </section>
+
+                <section class="card parameters-card" data-od-id="parameters-card-light">
+                  <header class="card-header">
+                    <h3>启动参数</h3>
+                    <div class="inline-actions" data-od-id="parameter-actions-light">
+                      <button class="text-button apply-link" type="button">应用更改</button>
+                      <button class="text-button" type="button">还原</button>
+                    </div>
+                  </header>
+                  <div class="accordion-list">
+                    <section class="accordion-group open" data-od-id="model-vision-group-light">
+                      <button class="accordion-head" type="button" aria-expanded="true"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>模型与视觉 <span class="count-badge">3</span></button>
+                      <div class="parameter-rows">
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">模型文件 (-m/--model)</span><div class="path-control"><input class="input" value="D:\models\qwen3-8b-q4_k_m.gguf"><button class="button" type="button">浏览</button></div><span class="param-value">GGUF</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">视觉投影 (--mmproj)</span><div class="path-control"><input class="input" value="D:\models\mmproj-qwen3-f16.gguf"><button class="button" type="button">浏览</button></div><span class="param-value">F16</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">别名</span><input class="input short-control" value="qwen-local"><span class="param-value">文本</span></div>
+                      </div>
+                    </section>
+                    <section class="accordion-group open" data-od-id="acceleration-group-light">
+                      <button class="accordion-head" type="button" aria-expanded="true"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>加速 <span class="count-badge">4</span></button>
+                      <div class="parameter-rows">
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">GPU 层数 (-ngl)</span><div class="range-control"><input type="range" min="0" max="999" value="999" aria-label="GPU 层数"></div><span class="param-value">999</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">投机解码</span><select class="select"><option>启用</option></select><span class="param-value">自动</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">草稿模型</span><div class="path-control"><input class="input" value="D:\models\qwen3-draft.gguf"><button class="button" type="button">浏览</button></div><span class="param-value">GGUF</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">草稿令牌数</span><div class="range-control"><input type="range" min="1" max="32" value="8" aria-label="草稿令牌数"></div><span class="param-value">8</span></div>
+                      </div>
+                    </section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>上下文与显存 <span class="count-badge">4</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>并发与吞吐 <span class="count-badge">4</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>采样 <span class="count-badge">7</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>网络 <span class="count-badge">2</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>高级 <span class="count-badge">4</span></button></section>
+                  </div>
+                </section>
+
+                <section class="card log-card collapsed" data-od-id="log-card-light">
+                  <div class="log-head"><div class="log-title"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>日志尾随 server.err</div><span class="count-badge">24</span></div>
+                </section>
+              </div>
+            </section>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel-shell" data-od-id="main-dark-panel">
+        <h2 class="panel-label">主界面 · 深色</h2>
+        <div class="window-viewport main-viewport">
+          <div class="window-scale">
+            <section class="app-window main-window theme-dark variant-expanded" data-od-id="main-window-dark">
+              <header class="app-header" data-od-id="main-header-dark">
+                <div class="app-title"><h2>llama.cpp 服务控制台</h2><span>QwenLLM</span></div>
+                <div class="service-select"><label for="service-dark">服务</label><select id="service-dark" class="select" aria-label="服务"><option>QwenLLM</option></select></div>
+              </header>
+
+              <div class="main-content">
+                <section class="card status-card" data-od-id="status-card-dark">
+                  <div class="warning-pill">● 有未应用的更改</div>
+                  <div class="status-row"><div class="service-status"><span class="status-dot"></span><strong>服务 RUNNING</strong></div><span class="health">探活 OK · 42ms</span></div>
+                  <div class="status-row"><div class="auto-start"><button class="switch" type="button" role="switch" aria-checked="true" aria-label="开机自启"></button><span class="auto-start-label">开机自启</span><span class="auto-state">自动(开机)</span></div><div class="status-actions"><button class="button button-primary" type="button" data-od-id="start-button-dark">启动</button><button class="button" type="button">停止</button><button class="button" type="button">重启</button><button class="button icon-button" type="button" aria-label="服务设置" title="服务设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg></button></div></div>
+                </section>
+
+                <section class="card preset-card" data-od-id="preset-card-dark"><span class="eyebrow">参数预设</span><input class="input" list="presets-dark" value="qwen3.8_Crack" aria-label="参数预设名称"><datalist id="presets-dark"><option value="qwen3.8_Crack"></option></datalist><button class="trash-button" type="button" aria-label="删除参数预设" title="删除参数预设"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></section>
+
+                <section class="card parameters-card" data-od-id="parameters-card-dark">
+                  <header class="card-header"><h3>启动参数</h3><div class="inline-actions" data-od-id="parameter-actions-dark"><button class="text-button apply-link" type="button">应用更改</button><button class="text-button" type="button">还原</button></div></header>
+                  <div class="accordion-list">
+                    <section class="accordion-group open" data-od-id="model-vision-group-dark">
+                      <button class="accordion-head" type="button" aria-expanded="true"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>模型与视觉 <span class="count-badge">3</span></button>
+                      <div class="parameter-rows">
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">模型文件 (-m/--model)</span><div class="path-control"><input class="input" value="D:\models\qwen3-8b-q4_k_m.gguf"><button class="button" type="button">浏览</button></div><span class="param-value">GGUF</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">视觉投影 (--mmproj)</span><div class="path-control"><input class="input" value="D:\models\mmproj-qwen3-f16.gguf"><button class="button" type="button">浏览</button></div><span class="param-value">F16</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">别名</span><input class="input short-control" value="qwen-local"><span class="param-value">文本</span></div>
+                      </div>
+                    </section>
+                    <section class="accordion-group open" data-od-id="acceleration-group-dark">
+                      <button class="accordion-head" type="button" aria-expanded="true"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>加速 <span class="count-badge">4</span></button>
+                      <div class="parameter-rows">
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">GPU 层数 (-ngl)</span><div class="range-control"><input type="range" min="0" max="999" value="999" aria-label="GPU 层数"></div><span class="param-value">999</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">投机解码</span><select class="select"><option>启用</option></select><span class="param-value">自动</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">草稿模型</span><div class="path-control"><input class="input" value="D:\models\qwen3-draft.gguf"><button class="button" type="button">浏览</button></div><span class="param-value">GGUF</span></div>
+                        <div class="parameter-row"><span class="help">?</span><span class="param-label">草稿令牌数</span><div class="range-control"><input type="range" min="1" max="32" value="8" aria-label="草稿令牌数"></div><span class="param-value">8</span></div>
+                      </div>
+                    </section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>上下文与显存 <span class="count-badge">4</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>并发与吞吐 <span class="count-badge">4</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>采样 <span class="count-badge">7</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>网络 <span class="count-badge">2</span></button></section>
+                    <section class="accordion-group"><button class="accordion-head" type="button" aria-expanded="false"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>高级 <span class="count-badge">4</span></button></section>
+                  </div>
+                </section>
+
+                <section class="card log-card expanded" data-od-id="log-card-dark">
+                  <div class="log-head"><div class="log-title"><span class="chevron"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>日志尾随 server.err</div><span class="count-badge">24</span></div>
+                  <div class="log-lines" aria-label="服务日志">
+                    <div class="log-line"><span class="log-time">11:42:06.118</span><span>主进程：正在监听 127.0.0.1:8080</span></div>
+                    <div class="log-line"><span class="log-time">11:42:06.302</span><span>模型：元数据加载成功</span></div>
+                    <div class="log-line warn-line"><span class="log-time">11:42:07.044</span><span>槽位 0：提示缓存为空，正在预热</span></div>
+                    <div class="log-line"><span class="log-time">11:42:07.816</span><span>服务：探活端点在 42ms 内返回 200</span></div>
+                    <div class="log-line"><span class="log-time">11:42:09.203</span><span>服务：已准备好接受连接</span></div>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel-shell" data-od-id="settings-light-panel">
+        <h2 class="panel-label">设置 · 浅色</h2>
+        <div class="window-viewport settings-viewport">
+          <div class="window-scale">
+            <section class="app-window settings-stage theme-light" data-od-id="settings-window-light">
+              <div class="settings-dialog" role="dialog" aria-labelledby="settings-title-light" data-od-id="settings-dialog-light">
+                <header class="dialog-header"><h2 id="settings-title-light">设置</h2></header>
+                <section class="settings-section"><span class="section-label">界面</span><div class="settings-controls"><select class="select" aria-label="语言"><option>中文</option></select></div></section>
+                <section class="settings-section"><span class="section-label">外观</span><div class="settings-controls"><select class="select" aria-label="外观"><option>跟随系统</option></select></div></section>
+                <section class="settings-section"><span class="section-label">动效</span><div class="settings-controls"><label class="checkbox-row"><input type="checkbox" checked>启用动效</label></div></section>
+                <section class="settings-section update-section"><span class="section-label">官方更新</span><div class="settings-controls"><select class="select" aria-label="官方更新版本"><option>win-cuda-13.4-x64</option></select><label class="checkbox-row"><input type="checkbox" checked>启动时自动检查更新</label><span class="update-status">当前：b6823-9d0f2a1 · 已是最新</span><div><button class="button" type="button">立即检查</button></div></div></section>
+                <footer class="dialog-footer"><button class="button" type="button" data-od-id="close-settings-light">关闭</button></footer>
+              </div>
+            </section>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel-shell" data-od-id="settings-dark-panel">
+        <h2 class="panel-label">设置 · 深色</h2>
+        <div class="window-viewport settings-viewport">
+          <div class="window-scale">
+            <section class="app-window settings-stage theme-dark" data-od-id="settings-window-dark">
+              <div class="settings-dialog" role="dialog" aria-labelledby="settings-title-dark" data-od-id="settings-dialog-dark">
+                <header class="dialog-header"><h2 id="settings-title-dark">设置</h2></header>
+                <section class="settings-section"><span class="section-label">界面</span><div class="settings-controls"><select class="select" aria-label="语言"><option>中文</option></select></div></section>
+                <section class="settings-section"><span class="section-label">外观</span><div class="settings-controls"><select class="select" aria-label="外观"><option>跟随系统</option></select></div></section>
+                <section class="settings-section"><span class="section-label">动效</span><div class="settings-controls"><label class="checkbox-row"><input type="checkbox" checked>启用动效</label></div></section>
+                <section class="settings-section update-section"><span class="section-label">官方更新</span><div class="settings-controls"><select class="select" aria-label="官方更新版本"><option>win-cuda-13.4-x64</option></select><label class="checkbox-row"><input type="checkbox" checked>启动时自动检查更新</label><span class="update-status">当前：b6823-9d0f2a1 · 已是最新</span><div><button class="button" type="button">立即检查</button></div></div></section>
+                <footer class="dialog-footer"><button class="button" type="button" data-od-id="close-settings-dark">关闭</button></footer>
+              </div>
+            </section>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

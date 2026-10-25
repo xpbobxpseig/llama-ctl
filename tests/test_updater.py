@@ -371,8 +371,48 @@ def test_prune_aggregates_errors_without_stopping(tmp_path, monkeypatch):
     with pytest.raises(OSError) as ei:
         updater.prune_old_subdirs(str(root), keep=1)
     assert "a" in str(ei.value)
-    # b 仍被删掉（未因 a 失败而中断）
-    assert sorted(p.name for p in root.iterdir()) == ["a", "c"]
+
+
+# ---------------------------------------------------------------------------
+# prune_nested_subdirs：backup/{tag}/{时间戳}/ 的两层滚动清理
+#
+# 根因：备份真实布局是 tag 目录里再套时间戳目录，只对 backup 根做 prune 时
+# 被保留的 tag 内部一份都不会清；同一 tag 反复安装（失败重试/回滚重装）会让
+# 备份无上限增长（每次约 1.3GB），README 的「保留最近 3 个」不成立。
+# ---------------------------------------------------------------------------
+
+def test_prune_nested_keeps_n_per_tag(tmp_path):
+    root = tmp_path / "backup"
+    for tag in ("b1", "b2"):
+        for i in range(1, 6):
+            d = root / tag / ("ts%d" % i)
+            d.mkdir(parents=True)
+            (d / "llama-server.exe").write_bytes(b"x")
+            os.utime(d, (1000 * i, 1000 * i))
+
+    removed = updater.prune_nested_subdirs(str(root), keep=3)
+
+    assert len(removed) == 4, "每个 tag 各删 2 份，共 4 份"
+    for tag in ("b1", "b2"):
+        left = sorted(p.name for p in (root / tag).iterdir())
+        assert left == ["ts3", "ts4", "ts5"], "每个 tag 内部应各保留最新 3 份"
+
+
+def test_prune_nested_never_deletes_files(tmp_path):
+    root = tmp_path / "backup"
+    (root / "b1" / "ts1").mkdir(parents=True)
+    (root / "b1" / "ts2").mkdir(parents=True)
+    (root / "keep.txt").write_text("x")
+    updater.prune_nested_subdirs(str(root), keep=1)
+    assert (root / "keep.txt").is_file(), "普通文件绝不能被删"
+
+
+def test_prune_nested_missing_root_and_zero_keep(tmp_path):
+    assert updater.prune_nested_subdirs(str(tmp_path / "nope"), keep=3) == []
+    root = tmp_path / "backup"
+    (root / "b1" / "ts1").mkdir(parents=True)
+    assert updater.prune_nested_subdirs(str(root), keep=0) == []
+    assert (root / "b1" / "ts1").is_dir(), "keep=0 不得删除任何内容"
 
 
 # ---------------------------------------------------------------------------
@@ -482,13 +522,16 @@ def test_is_valid_zip_never_raises(tmp_path):
 
 
 def test_download_rejects_truncated_by_content_length(tmp_path, monkeypatch):
-    """声明 100 字节、实收 10 字节 → 抛错，且 dest 与 .part 都不存在。"""
+    """声明 100 字节、实收 10 字节 → 抛错，且 dest 与 .part 都不存在。
+
+    attempts=1：本用例只验证「截断不得转正」，重试行为另有用例覆盖。
+    """
     dest = str(tmp_path / "big.zip")
     monkeypatch.setattr(updater, "urlopen",
                         lambda *a, **k: _FakeResp(b"X" * 10, content_length=100))
 
     with pytest.raises(updater.UpdateError) as ei:
-        updater.download("https://x/big.zip", dest)
+        updater.download("https://x/big.zip", dest, attempts=1)
 
     assert "不完整" in str(ei.value)
     assert not os.path.exists(dest), "截断产物不得转正为 dest"
@@ -501,8 +544,8 @@ def test_download_rejects_invalid_zip_when_length_unknown(tmp_path, monkeypatch)
     monkeypatch.setattr(updater, "urlopen",
                         lambda *a, **k: _FakeResp(b"garbage-not-a-zip"))
 
-    with pytest.raises(updater.UpdateError) as ei:
-        updater.download("https://x/unknown.zip", dest)
+    with pytest.raises(updater.UpdateError):
+        updater.download("https://x/unknown.zip", dest, attempts=1)
 
     assert not os.path.exists(dest)
     assert not os.path.exists(dest + ".part")
@@ -535,3 +578,302 @@ def test_download_reports_progress_and_completes(tmp_path, monkeypatch):
     updater.download("https://x/p.zip", dest, progress=lambda d, t: seen.append((d, t)))
 
     assert seen and seen[-1] == (len(payload), len(payload))
+
+
+class _FlakyResp:
+    """伪造响应：首次只给 part1 就断流，之后支持 Range 续传给剩余部分。
+
+    模拟实测的 CDN 抖动 —— 同一个 URL 连下 5 次有 1 次在传输中途被切断。
+    """
+
+    def __init__(self, payload, part1, served):
+        self._payload = payload
+        self._part1 = part1
+        self._served = served          # 已服务过几次（决定本次给多少）
+        self._pos = 0
+        self._start = 0
+        self.headers = {}
+        self.status = 200
+
+    def begin(self, range_start):
+        """按本次请求的 Range 起点准备响应体与头。
+
+        关键：Content-Length 一律声明**完整**长度——真实断流就是这样发生的
+        （实测响应头声明 423,535,356，实际只送达 2,276,115 字节）。若这里声明
+        的是短长度，断流就变得「符合声明」而不可检测，等于没模拟。
+        """
+        self._start = range_start
+        self._pos = 0
+        full = len(self._payload)
+        if range_start:
+            self.status = 206
+            self.headers["Content-Range"] = (
+                "bytes %d-%d/%d" % (range_start, full - 1, full))
+            self.headers["Content-Length"] = str(full - range_start)
+            body = self._payload[range_start:]
+        else:
+            self.status = 200
+            self.headers["Content-Length"] = str(full)
+            body = self._payload
+        # 首次只送到 part1 就断流（模拟连接中断）；之后送达完整
+        self._body = body if self._served else body[:self._part1]
+
+
+    def read(self, n=-1):
+        if self._pos >= len(self._body):
+            return b""
+        if n is None or n < 0:
+            n = len(self._body) - self._pos
+        chunk = self._body[self._pos:self._pos + n]
+        self._pos += len(chunk)
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_download_retries_and_resumes_after_mid_transfer_cut(tmp_path, monkeypatch):
+    """实测故障回归：传输中途被切断后，必须重试并**续传**补齐，而不是整次失败。
+
+    真实故障：cudart 只收到 2,276,115 / 423,535,356 字节就断流，旧实现单发
+    下载 → 直接抛「下载不完整…请重试」，用户点再多次也可能再次撞上抖动。
+    """
+    payload = _zip_bytes({"a.dll": "A" * 3000})
+    dest = str(tmp_path / "flaky.zip")
+    resp = _FlakyResp(payload, part1=1000, served=0)
+    calls = {"n": 0}
+
+    def fake_urlopen(req, **kw):
+        calls["n"] += 1
+        ra = req.headers.get("Range")           # 代码用的 "Range"
+        start = 0
+        if ra:
+            start = int(ra.split("=")[1].split("-")[0])
+        resp.begin(start)
+        resp._served += 1
+        return resp
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    got = updater.download("https://x/flaky.zip", dest, attempts=3, backoff=0)
+
+    assert got == dest
+    assert open(dest, "rb").read() == payload
+    assert calls["n"] == 2, "应重试一次（第 2 次续传补齐）"
+    assert not os.path.exists(dest + ".part")
+
+
+def test_download_resume_restarts_from_zero_when_server_ignores_range(
+        tmp_path, monkeypatch):
+    """服务端不支持 Range（回 200 而非 206）时必须从头写，不能追加出坏文件。"""
+    payload = _zip_bytes({"a.dll": "B" * 3000})
+    dest = str(tmp_path / "norange.zip")
+
+    class _NoRange:
+        """始终回 200（忽略 Range）并声明**完整**长度，但首次只送 500 字节。"""
+
+        _SHORT = 500
+
+        def __init__(self, served):
+            self._served = served
+            self._pos = 0
+            self.status = 200                  # 始终 200：忽略 Range
+            self.headers = {"Content-Length": str(len(payload))}
+            self._body = payload if served else payload[:self._SHORT]
+
+        def read(self, n=-1):
+            if self._pos >= len(self._body):
+                return b""
+            if n is None or n < 0:
+                n = len(self._body) - self._pos
+            c = self._body[self._pos:self._pos + n]
+            self._pos += len(c)
+            return c
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    state = {"n": 0}
+
+    def fake_urlopen(req, **kw):
+        r = _NoRange(state["n"])
+        state["n"] += 1
+        return r
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    got = updater.download("https://x/norange.zip", dest, attempts=3, backoff=0)
+
+    assert got == dest
+    assert open(dest, "rb").read() == payload, "不支持续传时必须从头重下"
+    assert updater.is_valid_zip(dest) is True
+
+
+def test_download_exhausts_attempts_then_cleans_up(tmp_path, monkeypatch):
+    """重试全部失败：抛最后一次的错误，且 dest 与 .part 都不留。"""
+    dest = str(tmp_path / "always_bad.zip")
+    calls = {"n": 0}
+
+    def fake_urlopen(req, **kw):
+        calls["n"] += 1
+        return _FakeResp(b"X" * 10, content_length=999)
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    with pytest.raises(updater.UpdateError) as ei:
+        updater.download("https://x/big.zip", dest, attempts=3, backoff=0)
+
+    assert "不完整" in str(ei.value)
+    assert calls["n"] == 3, "应按 attempts 次数重试"
+    assert not os.path.exists(dest)
+    assert not os.path.exists(dest + ".part")
+
+
+def test_download_rejects_full_length_but_corrupt_content(tmp_path, monkeypatch):
+    """长度恰好相符但内容损坏（清零）的样本不得转正。
+
+    实测故障：中央目录完好、长度逐字节等于 Content-Length，但 92.65% 的字节是 0，
+    解压时 CRC 失败。只信长度会把它转正成缓存并永久复用，所以长度相符后仍必须
+    做内容校验。
+    """
+    good = _zip_bytes_stored({"cublas64_13.dll": b"A" * 20000})
+    at = good.find(b"A" * 20000)
+    corrupt = bytearray(good)
+    corrupt[at:at + 20000] = b"\x00" * 20000        # 清零数据，长度不变
+    dest = str(tmp_path / "corrupt.zip")
+
+    monkeypatch.setattr(updater, "urlopen",
+                        lambda *a, **k: _FakeResp(bytes(corrupt),
+                                                  content_length=len(corrupt)))
+    with pytest.raises(updater.UpdateError) as ei:
+        updater.download("https://x/corrupt.zip", dest, attempts=2, backoff=0)
+
+    assert "校验失败" in str(ei.value)
+    assert not os.path.exists(dest), "长度对但内容坏的文件不得转正"
+    assert not os.path.exists(dest + ".part")
+
+
+def test_download_keeps_partial_file_across_attempts(tmp_path, monkeypatch):
+    """一次中断后，下一次必须发 Range 续传（而不是从头重下）。"""
+    payload = _zip_bytes({"a.dll": "C" * 5000})
+    dest = str(tmp_path / "resume.zip")
+    sent = {"first": False}
+    ranges = []
+
+    class _Once:
+        def __init__(self, body, status, cl):
+            self._b = body
+            self._p = 0
+            self.status = status
+            self.headers = {"Content-Length": str(cl)}
+
+        def read(self, n=-1):
+            if self._p >= len(self._b):
+                return b""
+            if n is None or n < 0:
+                n = len(self._b) - self._p
+            c = self._b[self._p:self._p + n]
+            self._p += len(c)
+            return c
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, **kw):
+        ranges.append(req.headers.get("Range"))
+        if not sent["first"]:
+            sent["first"] = True
+            # 声明完整长度，却只给前 1000 字节 → 中断
+            return _Once(payload[:1000], 200, len(payload))
+        start = 1000
+        return _Once(payload[start:], 206, len(payload) - start)
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    got = updater.download("https://x/resume.zip", dest, attempts=3, backoff=0)
+
+    assert got == dest
+    assert open(dest, "rb").read() == payload
+    assert ranges == [None, "bytes=1000-"], "第二次必须从断点续传"
+
+
+# ---------------------------------------------------------------------------
+# 回归：残留 .part 不得让下载陷入「删数据 → 必然 416」的死循环
+#
+# 根因：total 已知时若 done >= total，旧实现清 .part 却不清 total，于是下一轮
+# 发出 `Range: bytes=<总长>-`。真实 CDN 对「起始偏移 == 文件长度」返回 416
+# （对 b11213 主二进制实测：bytes=152343958- → HTTP 416），10 次尝试全打在
+# 这个必然失败的请求上，最后把其实已经完整的数据删掉。
+# ---------------------------------------------------------------------------
+
+def test_download_promotes_already_complete_part_without_network(tmp_path, monkeypatch):
+    """.part 已完整且是有效 zip → 直接转正，0 次网络请求（上次被杀/转正失败的形态）。"""
+    payload = _zip_bytes({"a.dll": "D" * 20000})
+    dest = str(tmp_path / "complete.zip")
+    with open(dest + ".part", "wb") as fh:
+        fh.write(payload)                     # 长度与内容都正确，但没转正
+
+    def boom(*a, **k):
+        raise AssertionError("已完整的 .part 不该再发起任何网络请求")
+
+    monkeypatch.setattr(updater, "urlopen", boom)
+    got = updater.download("https://x/complete.zip", dest, attempts=3, backoff=0)
+
+    assert got == dest
+    assert open(dest, "rb").read() == payload
+    assert not os.path.exists(dest + ".part")
+
+
+def test_download_recovers_from_416_instead_of_looping(tmp_path, monkeypatch):
+    """.part 抵达 EOF 语义（起点==总长）时服务端回 416：必须丢弃重下，不得死循环。"""
+    payload = _zip_bytes({"a.dll": "E" * 20000})
+    dest = str(tmp_path / "at416.zip")
+    log = []
+
+    class _Resp:
+        def __init__(self, status, body, cl):
+            self.status, self._b, self._p = status, body, 0
+            self.headers = {"Content-Length": str(cl)}
+
+        def read(self, n=-1):
+            if self._p >= len(self._b):
+                return b""
+            if n is None or n < 0:
+                n = len(self._b) - self._p
+            c = self._b[self._p:self._p + n]
+            self._p += len(c)
+            return c
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, **kw):
+        rng = req.headers.get("Range")
+        start = int(rng.split("=")[1].rstrip("-")) if rng else 0
+        log.append(start)
+        if start >= len(payload):            # 真实 CDN 行为
+            raise updater.HTTPError("https://x", 416, "Range Not Satisfiable", {},
+                                    __import__("io").BytesIO(b""))
+        if start:
+            return _Resp(206, payload[start:], len(payload) - start)
+        return _Resp(200, payload, len(payload))
+
+    # 残留一个「长度等于远端」的 .part（内容其实已完整）：首次进入 total 未知，
+    # 若直接续传会撞 416；修复后必须能自愈。
+    with open(dest + ".part", "wb") as fh:
+        fh.write(payload)
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+
+    got = updater.download("https://x/at416.zip", dest, attempts=3, backoff=0)
+
+    assert got == dest
+    assert open(dest, "rb").read() == payload
+    assert sum(1 for s in log if s >= len(payload)) <= 1, "416 不得反复出现"

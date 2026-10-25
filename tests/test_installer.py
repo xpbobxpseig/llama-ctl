@@ -97,7 +97,10 @@ class FakeDeps:
         if verb == "start":
             if self.flags.get("start_fail"):
                 return False, "denied"
-            self.state = "RUNNING"
+            # start_never_running：命令成功但服务始终不进入 RUNNING
+            # （真实形态：llama-server 启动即崩，sc start 仍返回 0）
+            if not self.flags.get("start_never_running"):
+                self.state = "RUNNING"
         if verb == "stop":
             self.state = "STOPPED"
         return True, "ok"
@@ -271,6 +274,64 @@ def test_rollback_failure_does_not_raise(tmp_path):
     installer.rollback_files(["a.dll"], "t", "b", sink.append, deps)
     assert deps.called("restore_files")
     assert any("回滚失败" in s or "Rollback failed" in s for s in sink)
+
+
+# ---------------------------------------------------------------------------
+# 回归：start 抛异常也必须回滚 + 收尾（原实现只在「未 RUNNING」分支回滚，
+# 启动命令本身异常会直接穿透，留下「服务停摆 + 新二进制已落盘」）。
+# ---------------------------------------------------------------------------
+
+def test_start_raising_rolls_back_and_restarts(tmp_path, monkeypatch):
+    """deps.action('start') 抛非 OSError 异常：必须回滚已替换文件并尽力恢复服务。"""
+
+    class RaisingDeps(FakeDeps):
+        def action(self, verb, service):
+            if verb == "start":
+                raise ValueError("sc_action 内部异常")
+            return FakeDeps.action(self, verb, service)
+
+    deps = RaisingDeps(zip_names=["llama-server.exe", "new.dll"])
+    monkeypatch.setattr(installer, "time", _NoSleepTime())
+    sink = []
+
+    def fake_isfile(p):
+        s = str(p)
+        return s.endswith("llama-server.exe") or s.endswith("llama-win.zip")
+
+    monkeypatch.setattr(installer.os.path, "isfile", fake_isfile)
+    with pytest.raises(UpdateError):
+        installer.install(_rel(), "QwenLLM", "t", "b", sink.append, "d", deps=deps)
+
+    assert deps.called("restore_files"), "启动异常后必须回滚已替换文件"
+    assert any("启动服务失败" in s or "Failed to start" in s for s in sink)
+
+
+def test_wait_for_running_reports_progress(tmp_path, monkeypatch):
+    """等待 RUNNING 期间必须周期性报进度（不再静默 60 秒）。"""
+    deps = FakeDeps(state="RUNNING", start_never_running=True)
+    monkeypatch.setattr(installer, "time", _NoSleepTime())
+    sink = []
+
+    def fake_isfile(p):
+        s = str(p)
+        return s.endswith("llama-server.exe") or s.endswith("llama-win.zip")
+
+    monkeypatch.setattr(installer.os.path, "isfile", fake_isfile)
+    with pytest.raises(UpdateError):
+        installer.install(_rel(), "QwenLLM", "t", "b", sink.append, "d", deps=deps)
+
+    assert any("等待服务进入 RUNNING" in s or "Waiting for the service" in s
+               for s in sink), "长等待必须有进度输出"
+
+
+def test_try_restart_service_gives_up_quickly(tmp_path, monkeypatch):
+    """收尾恢复是尽力而为：不得再叠加 60 秒静默等待。"""
+    sleeps = []
+    monkeypatch.setattr(installer.time, "sleep", lambda s: sleeps.append(s))
+    deps = FakeDeps(state="STOPPED")          # start 后状态不变 → 一直等
+    sink = []
+    installer._try_restart_service("QwenLLM", sink.append, deps)
+    assert len(sleeps) <= 40, "收尾恢复的等待次数应显著小于主等待的 120 次"
 
 
 def test_remove_added_failure_does_not_raise():

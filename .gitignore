@@ -20,6 +20,10 @@ _smoke_p3.py
 
 # 一次性基准/性能测试输出（llama-bench 结果，不进仓库）
 bench*.txt
+
+# 本地临时工作区与工具状态（不进仓库）
+Temp/
+.engram/
 src-tauri/core/target/
 # 两个新 crate 的构建产物（与 core 同一约定：只忽略 target，不建嵌套 git 目录）
 src-tauri/commands/target/
@@ -30,3 +34,7 @@ src-tauri/gen/
 frontend/node_modules/
 frontend/dist/
 frontend/.smoke/
+
+# 根目录交付物（build.ps1 生成；Tauri 中间产物仍在 src-tauri/target）
+/llama-ctl.exe
+/llama-ctl_*-setup.exe
