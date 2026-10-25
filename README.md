@@ -51,6 +51,10 @@ cd ..
 
 > 需要先 `cargo install tauri-cli --version "^2"`。本机已验证 `cargo tauri --version` 为 2.12.3；`build.ps1` 会负责前端构建、Rust 打包和根目录复制。
 
+### 更新日志
+
+- **v0.1.0（拉马管家，当前）**：桌面端从 CustomTkinter 整体重写为 **Tauri 2 + Vue 3**，落地 v6「精密仪器」设计系统（见 `docs/ui-redesign-v6.md`）；官方 llama.cpp 更新下载支持断点续传（Range）+ 重试退避 + ZIP 逐条 CRC 校验后才转正；界面骨架文案中英双语。已发布资源：[NSIS 安装包 + 绿色版 exe](https://github.com/xpbobxpseig/llama-ctl/releases/tag/v0.1.0)，SHA256 见 release 说明。
+
 ### 环境变量（可选）
 
 程序默认使用作者本机的路径；在其他机器上部署时用环境变量覆盖，无需改代码：
@@ -216,6 +220,10 @@ cd ..
 ```
 
 > Requires `cargo install tauri-cli --version "^2"`. On this machine `cargo tauri --version` is 2.12.3; `build.ps1` handles the frontend build, Rust packaging and root copy.
+
+### Changelog
+
+- **v0.1.0 (current)**: the desktop app was rewritten from CustomTkinter to **Tauri 2 + Vue 3**, landing the v6 "precision instrument" design system (see `docs/ui-redesign-v6.md`); official llama.cpp downloads now resume interrupted transfers (Range) with retry/backoff and per-entry ZIP CRC validation before promotion; UI chrome is bilingual. Released assets: the [NSIS installer + portable exe](https://github.com/xpbobxpseig/llama-ctl/releases/tag/v0.1.0); SHA256 checksums are in the release notes.
 
 ### Environment variables (optional)
 
