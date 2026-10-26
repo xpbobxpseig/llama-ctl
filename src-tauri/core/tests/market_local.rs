@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use llama_ctl_core::deps::Deps;
 use llama_ctl_core::fake::FakeDeps;
 use llama_ctl_core::market::hwinfo::{Gpu, GpuVendor, Hardware};
 use llama_ctl_core::market::local::{delete, is_current_model, scan};
@@ -105,4 +106,15 @@ fn delete_removes_mmproj_and_shard_siblings() {
     assert!(deps.file(Path::new(r"F:\AI_Model\Big\m-Q4_K_M-00001-of-00002.gguf")).is_none());
     assert!(deps.file(Path::new(r"F:\AI_Model\Big\m-Q4_K_M-00002-of-00002.gguf")).is_none());
     assert!(deps.file(Path::new(r"F:\AI_Model\Big\mmproj-f16.gguf")).is_none());
+}
+
+#[test]
+fn disk_free_is_scripted_and_none_when_unknown() {
+    let deps = FakeDeps::new().with_disk_free(r"F:\AI_Model", Some(1_073_741_824_000));
+    assert_eq!(
+        deps.disk_free(Path::new(r"F:\AI_Model")).unwrap(),
+        Some(1_073_741_824_000),
+    );
+    // 未脚本化的路径（网络盘 / 拔掉的盘）→ None，绝不报错炸 UI。
+    assert_eq!(deps.disk_free(Path::new(r"Q:\missing")).unwrap(), None);
 }

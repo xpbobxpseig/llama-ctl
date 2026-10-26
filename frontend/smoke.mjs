@@ -41,6 +41,21 @@ import { JSDOM, VirtualConsole } from 'jsdom'
 // 版本号单源：与 AboutView 一样直接读 frontend/package.json。
 const PKG = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'))
 
+// ---- 日志轮询策略：纯函数，node 侧直接断言（不走 jsdom） --------------------
+// 长挂日志页是常驻开销：紧跟档 1.5s，静默后退到 5s 上限，新行立刻回紧跟档。
+{
+  const { nextPollMs, POLL_ACTIVE_MS, POLL_IDLE_MAX_MS } = await import('./src/design/log-poll.js')
+  assert.equal(POLL_ACTIVE_MS, 1500, '紧跟档 1.5s（与旧行为一致）')
+  assert.equal(nextPollMs(true, 99), POLL_ACTIVE_MS, '有新行：无论静默多久，立刻回紧跟档')
+  assert.equal(nextPollMs(false, 0), 1500, '静默初期：保持 1.5s')
+  assert.equal(nextPollMs(false, 2), 1500, '静默第 3 拍前：仍 1.5s')
+  assert.equal(nextPollMs(false, 3), 3000, '静默 3 拍：退到 3s')
+  assert.equal(nextPollMs(false, 5), 3000, '静默 5 拍：仍 3s')
+  assert.equal(nextPollMs(false, 6), POLL_IDLE_MAX_MS, '静默 6 拍：退到 5s 上限')
+  assert.equal(nextPollMs(false, 50), POLL_IDLE_MAX_MS, '上限封顶')
+  console.log('ok  日志轮询自适应：1.5s 紧跟 → 静默退到 5s（降 IPC 与读盘）')
+}
+
 // ---- bundle the app the way `npm run build` does ----------------------------
 
 await build({
@@ -1603,6 +1618,36 @@ if (updaterSrc) {
     'Rust 回读的 Snapshot 已生效（store 持有新值）',
   )
   console.log('ok  市场「启用」：回填 model/mmproj 并走 Apply，回读生效')
+}
+
+// ---- 市场视图：ETA / 磁盘剩余 / 下载完成行内启用（交互闭环回归） ----
+
+{
+  await click(q('.nav[data-view="market"]'), '导航市场')
+  await flush()
+  // ① 硬件行按设备分行，且带 local_scan.disk_free 的磁盘剩余行
+  const hwRows = qa('.hwmeta .hwrow').map(txt)
+  assert.ok(hwRows.some((r) => r.includes('显卡') && r.includes('RTX 4090')), '显卡单独一行')
+  assert.ok(hwRows.some((r) => r.includes('内存')), '内存单独一行')
+  assert.ok(
+    hwRows.some((r) => r.includes('磁盘剩余') && r.includes('1000GB')),
+    '磁盘剩余行来自 local_scan.disk_free（1073741824000 → 1000GB）',
+  )
+  // ② running 任务带 ETA（received/total/speed 推出「预计剩余」）
+  const runningRow = qa('.mrow.task').find((r) => txt(r).includes(COPY.dlRunning[0]))
+  assert.ok(runningRow, 'fixture 有下载中任务行')
+  assert.match(txt(runningRow), new RegExp(COPY.eta[0]), 'running 行显示预计剩余时间')
+  // ③ done 任务匹配到已下载条目 → 行内直接「启用」（不用滚到已下载区）
+  const doneRow = qa('.mrow.task').find((r) => txt(r).includes(COPY.dlFin[0]))
+  assert.ok(doneRow, 'fixture 有完成任务行')
+  const enableBtn = [...doneRow.querySelectorAll('button')].find((b) => txt(b) === COPY.enable[0])
+  assert.ok(enableBtn, '完成任务行内出现「启用」按钮')
+  await click(enableBtn, '完成任务行启用')
+  const ask = doneRow.querySelector('.ask')
+  assert.ok(ask && txt(ask).includes(COPY.enableAsk[0].slice(0, 10)), '行内确认条先问再发')
+  await click([...ask.querySelectorAll('button')].at(-1), '取消确认')
+  await click(q('.nav[data-view="params"]'), '回参数页（后续测试依赖参数页）')
+  console.log('ok  市场视图：ETA / 磁盘剩余 / 完成任务行内启用')
 }
 
 // ---- 参数页动作条：保存为预设（用户指出参数页缺这个入口） ----

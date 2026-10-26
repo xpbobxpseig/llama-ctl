@@ -382,6 +382,34 @@ impl Deps for RealDeps {
         Ok(hex_encode(&hasher.finalize()))
     }
 
+    fn disk_free(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+        // 接受任意位于目标卷上的路径（按卷解析）。网络盘 / 拔掉的盘会失败，
+        // 按契约折叠成 None —— 市场页显示「未知」，绝不报错。
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut free: u64 = 0;
+        let mut total: u64 = 0;
+        let mut total_free: u64 = 0;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                PCWSTR(wide.as_ptr()),
+                Some(&mut free),
+                Some(&mut total),
+                Some(&mut total_free),
+            )
+        };
+        if ok.is_err() {
+            return Ok(None);
+        }
+        Ok(Some(free))
+    }
+
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {
         // `/health` on current builds, `/healthz` on older ones.
         for path in ["/health", "/healthz"] {

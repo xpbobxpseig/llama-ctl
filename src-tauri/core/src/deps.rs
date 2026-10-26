@@ -81,6 +81,12 @@ pub trait Deps {
     /// SHA-256 of a file, lowercase hex, read streaming (models are huge).
     fn hash_file(&self, path: &Path) -> Result<String, DepsError>;
 
+    /// Free bytes on the volume holding `path`, `None` when the volume can't
+    /// be determined (unmapped network drive, removable media gone). The
+    /// market shows it next to the download root and prechecks it before a
+    /// multi-GB order — a missing answer must degrade quietly, never error.
+    fn disk_free(&self, path: &Path) -> Result<Option<u64>, DepsError>;
+
     /// `true` when the service answered `/healthz`.
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError>;
 

@@ -28,6 +28,7 @@ pub enum Call {
     AppendFile { path: PathBuf, len: usize },
     HashFile(PathBuf),
     FileSize(PathBuf),
+    DiskFree(PathBuf),
     ProbeHealth { host: String, port: u16 },
 }
 
@@ -55,6 +56,8 @@ pub struct FakeDeps {
     /// Simulated failures, applied by path so a test can make exactly one
     /// write fail and assert the transaction rolled back.
     failing_writes: HashMap<PathBuf, DepsError>,
+    /// Scripted free bytes per volume path; unscripted paths answer `None`.
+    disk_free: HashMap<PathBuf, Option<u64>>,
 }
 
 /// Scripted download stream for [`Deps::http_open_range`]. `fail_first_after`
@@ -88,6 +91,11 @@ impl FakeDeps {
 
     pub fn with_reg_string(mut self, path: &str, value: &str, v: Option<String>) -> Self {
         self.reg_strings.insert((path.to_string(), value.to_string()), v);
+        self
+    }
+
+    pub fn with_disk_free(mut self, path: impl Into<PathBuf>, free: Option<u64>) -> Self {
+        self.disk_free.insert(path.into(), free);
         self
     }
 
@@ -411,6 +419,11 @@ impl Deps for FakeDeps {
         let mut h = sha2::Sha256::new();
         h.update(&bytes);
         Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    }
+
+    fn disk_free(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.calls.borrow_mut().push(Call::DiskFree(path.to_path_buf()));
+        Ok(self.disk_free.get(path).copied().flatten())
     }
 
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {

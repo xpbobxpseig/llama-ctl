@@ -131,6 +131,9 @@ impl Deps for ScriptedSc<'_> {
     fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
         self.inner.hash_file(path)
     }
+    fn disk_free(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.inner.disk_free(path)
+    }
     /// Records through the inner fake, then answers `sc` itself.
     fn spawn(&self, program: &str, args: &[&str]) -> Result<Vec<u8>, DepsError> {
         let recorded = self.inner.spawn(program, args);

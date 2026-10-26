@@ -208,3 +208,32 @@ fn benchmark_records_replaced_per_model() {
     assert_eq!(mgr.benchmarks().len(), 1);
     assert_eq!(mgr.benchmark_for(DEST).unwrap().tg_tps, 43.5);
 }
+
+#[test]
+fn enqueue_prechecks_disk_space_and_states_the_gap() {
+    let data = payload(5000);
+    // 剩余 1KB < 需要 5000B：直接拒绝，错误里明示需要 / 剩余 / 缺口，且不入队
+    let deps = FakeDeps::new()
+        .with_http_range(URL, data.clone())
+        .with_disk_free(DEST, Some(1024));
+    let mut mgr = DownloadManager::new(STORE.into());
+    mgr.backoff_ms = 0;
+    let err = mgr.enqueue(&deps, task(&data)).unwrap_err();
+    assert!(err.message.contains("5000"), "错误给出需要空间：{}", err.message);
+    assert!(err.message.contains("1024"), "错误给出剩余空间：{}", err.message);
+    assert!(err.message.contains("磁盘空间不足"), "错误点明原因：{}", err.message);
+    assert!(mgr.tasks().is_empty(), "被拒的任务绝不入队");
+
+    // 剩余充足：照常入队
+    let deps_ok = FakeDeps::new()
+        .with_http_range(URL, data.clone())
+        .with_disk_free(DEST, Some(1 << 40));
+    mgr.enqueue(&deps_ok, task(&data)).unwrap();
+    assert_eq!(mgr.tasks().len(), 1);
+
+    // 卷不可知（None）：不拦——口径拿不准不该变成硬错误
+    let mut mgr2 = DownloadManager::new(STORE.into());
+    let deps_unknown = FakeDeps::new().with_http_range(URL, data.clone());
+    mgr2.enqueue(&deps_unknown, task(&data)).unwrap();
+    assert_eq!(mgr2.tasks().len(), 1);
+}

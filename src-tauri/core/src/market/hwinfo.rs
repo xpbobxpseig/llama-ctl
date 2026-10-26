@@ -146,7 +146,7 @@ pub struct FitVerdict {
     pub offload_ratio: Option<u64>,
 }
 
-fn gb(bytes: u64) -> String {
+pub(crate) fn gb(bytes: u64) -> String {
     format!("{:.1}GB", bytes as f64 / GI as f64)
 }
 

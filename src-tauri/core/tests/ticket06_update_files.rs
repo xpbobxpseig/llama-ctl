@@ -302,6 +302,9 @@ impl Deps for FlakyNet<'_> {
     fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
         self.inner.hash_file(path)
     }
+    fn disk_free(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.inner.disk_free(path)
+    }
     fn reg_read_dword(
         &self,
         hive: RegHive,

@@ -63,6 +63,8 @@ export const C = {
   marketHfToken: ['HuggingFace 令牌', 'HuggingFace token'],
   marketMsToken: ['魔搭令牌', 'ModelScope token'],
   shards: ['分片', 'shards'],
+  eta: ['预计剩余', 'ETA'],
+  diskFree: ['磁盘剩余', 'Disk free'],
   svc: ['服务', 'Services'],
   all: ['全部', 'All'],
   changed: ['已改', 'Changed'],

@@ -59,6 +59,17 @@ function fmtCount(n) {
   return n >= 10000 ? `${(n / 10000).toFixed(1)}w` : String(n)
 }
 
+/** 剩余秒数 → 「6分18秒」；算不出（无速度/已完成）给空串，不显示。 */
+function fmtEta(s) {
+  if (!Number.isFinite(s) || s <= 0) return ''
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.round(s % 60)
+  if (h > 0) return `${h}小时${m}分`
+  if (m > 0) return `${m}分${sec}秒`
+  return `${sec}秒`
+}
+
 const tierText = { full_gpu: 'fitFull', partial_gpu: 'fitPartial', cpu_only: 'fitCpu', not_recommended: 'fitNo' }
 const tierClass = { full_gpu: 'fit-full', partial_gpu: 'fit-partial', cpu_only: 'fit-cpu', not_recommended: 'fit-no' }
 
@@ -116,20 +127,43 @@ function onBench(model) {
 function onEnable(model) {
   if (askEnable.value === model.path) {
     askEnable.value = ''
-    market.enable(model).then((r) => {
-      if (!r) return // 失败：applyError 行已浮出
-      if (r.needs_restart) {
-        askRestart.value = true // 服务在跑：给「立即重启」让参数真正生效
-      } else if (r.written === false) {
-        enableDone.value = tr('enableCurrent')
-        setTimeout(() => (enableDone.value = ''), 4000)
-      } else {
-        enableDone.value = tr('enableDone') // 服务未运行：下次启动生效
-        setTimeout(() => (enableDone.value = ''), 4000)
-      }
-    })
+    market.enable(model).then(afterEnable)
   } else {
     askEnable.value = model.path
+    askDel.value = ''
+    askBench.value = ''
+  }
+}
+
+/** 启用发出后的三种回填：需重启 / 已是当前模型 / 正常生效。 */
+function afterEnable(r) {
+  if (!r) return // 失败：applyError 行已浮出
+  if (r.needs_restart) {
+    askRestart.value = true // 服务在跑：给「立即重启」让参数真正生效
+  } else if (r.written === false) {
+    enableDone.value = tr('enableCurrent')
+    setTimeout(() => (enableDone.value = ''), 4000)
+  } else {
+    enableDone.value = tr('enableDone') // 服务未运行：下次启动生效
+    setTimeout(() => (enableDone.value = ''), 4000)
+  }
+}
+
+// ---- 下载完成 → 行内启用（不用滚去已下载区） ------------------------------
+
+const askTask = ref('')
+
+const localFor = (t) => market.taskToLocal(t)
+
+function onTaskEnable(t) {
+  const m = localFor(t)
+  if (!m) return
+  if (askTask.value === t.id) {
+    askTask.value = ''
+    market.enable(m).then(afterEnable)
+  } else {
+    askTask.value = t.id
+    askEnable.value = ''
     askDel.value = ''
     askBench.value = ''
   }
@@ -160,7 +194,9 @@ async function openFolder(model) {
 const unlisten = []
 
 onMounted(async () => {
-  unlisten.push(await market.subscribe())
+  // subscribe() 返回的是 unlisten 数组——必须摊开；整体 push 会让卸载钩子
+  // 对数组调 fn()，每次离开市场页都抛 TypeError（Vue 只在控制台里吞掉）。
+  unlisten.push(...(await market.subscribe()))
   await market.init()
 })
 
@@ -264,12 +300,19 @@ onBeforeUnmount(() => {
         <span class="fl">{{ t.repo }}</span>
         <span class="mono dim">{{ fmtBytes(t.received) }} / {{ fmtBytes(t.total) }}</span>
         <span v-if="t.state === 'running' && t.speed_bps" class="mono dim">{{ fmtBytes(t.speed_bps) }}/s</span>
+        <span v-if="t.state === 'running' && t.speed_bps" class="mono dim">· {{ tr('eta') }} {{ fmtEta((t.total - t.received) / t.speed_bps) }}</span>
         <span class="fit" :class="{ 'f-err': t.state === 'failed' }">{{ tr(stateText[t.state] || 'dlQueued') }}<template v-if="t.state === 'failed'">：{{ t.error }}</template></span>
       </div>
       <div v-if="t.state === 'running' || t.state === 'paused'" class="pbar">
         <div class="pfill" :style="{ width: pct(t) + '%' }"></div>
       </div>
+      <p v-if="t.state === 'done' && localFor(t) && askTask === t.id" class="ask">
+        <span>{{ tr('enableAsk') }}</span>
+        <button class="pillbtn" type="button" @click="onTaskEnable(t)">{{ tr('enable') }}</button>
+        <button class="textbtn" type="button" @click="askTask = ''">{{ tr('cancelDl') }}</button>
+      </p>
       <div class="vops">
+        <button v-if="t.state === 'done' && localFor(t)" class="textbtn" type="button" @click="onTaskEnable(t)">{{ tr('enable') }}</button>
         <button v-if="t.state === 'running'" class="textbtn" type="button" @click="market.pauseTask(t.id)">{{ tr('pause') }}</button>
         <button v-if="t.state === 'paused' || t.state === 'failed'" class="textbtn" type="button" @click="market.resumeTask(t.id)">{{ tr('resume') }}</button>
         <button v-if="t.state !== 'done'" class="textbtn danger" type="button" @click="market.cancelTask(t.id)">{{ tr('cancelDl') }}</button>
@@ -293,6 +336,11 @@ onBeforeUnmount(() => {
       <div v-if="hardware.ram_total" class="hwrow">
         <span class="hwk">{{ tr('hwRam') }}</span>
         <span class="mono hwv">{{ gb(hardware.ram_total) }}</span>
+      </div>
+      <!-- 下载根所在卷的剩余空间：None（网络盘等）整行隐藏 -->
+      <div v-if="market.local.value?.disk_free != null" class="hwrow">
+        <span class="hwk">{{ tr('diskFree') }}</span>
+        <span class="mono hwv">{{ gb(market.local.value.disk_free) }}</span>
       </div>
     </div>
     <div v-if="!localModels.length" class="lrow meta">{{ tr('localEmpty') }}</div>

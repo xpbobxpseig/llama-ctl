@@ -3,7 +3,8 @@
  * 日志页 · 与稿 1:1：一条 `.logmeta`（文件路径 + 清空 + 跟随开关）+ `.logline` 列表。
  *
  * 两个真实来源与 LogTail 一致：`tail_log` 的尾部（Rust 决定路径与截断），
- * 以及重启/更新时流进 `snapshot.log` 的过程行。跟随开启时按 1500ms 轮询；
+ * 以及重启/更新时流进 `snapshot.log` 的过程行。跟随开启时自适应轮询
+ * （log-poll.js：紧跟 1.5s，静默退到 5s 上限，新行立刻回紧跟档）；
  * shell 外只有演示行，并照实显示。
  *
  * 「清空」只清**屏幕**：过程行清掉，文件尾按清空瞬间的内容记一个签名，
@@ -13,6 +14,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as store from '../stores/snapshot.js'
 import { tailLog } from '../api/ipc.js'
+import { nextPollMs } from './log-poll.js'
 import { t } from './copy.js'
 
 const lang = computed(() => store.lang.value)
@@ -29,7 +31,7 @@ const root = ref(null)
 
 let timer = null
 let token = 0
-const POLL_MS = 1500
+let idlePolls = 0
 
 function clearView() {
   store.clearLog()
@@ -77,26 +79,35 @@ async function copyDiag() {
 async function poll() {
   const mine = ++token
   try {
+    const before = fileLines.value.at(-1) ?? ''
+    const beforeLen = fileLines.value.length
     const { lines, path } = await tailLog()
     if (mine !== token) return
-    fileLines.value = lines || []
+    const next = lines || []
+    // 签名比较兼顾「清空后恢复」：行内容或行数变了就是文件在动。
+    const changed = (next.at(-1) ?? '') !== before || next.length !== beforeLen
+    idlePolls = changed ? 0 : idlePolls + 1
+    fileLines.value = next
     fileFrom.value = path || ''
   } catch {
-    // 一次失败不能清空已有内容。
+    // 一次失败不能清空已有内容，也不推进静默计数（下拍按原节奏再试）。
+    idlePolls = 0
   }
+  if (mine !== token) return
+  timer = setTimeout(poll, nextPollMs(false, idlePolls))
 }
 
 function start() {
   stop()
   if (store.isDemo.value) return
+  idlePolls = 0
   poll()
-  timer = setInterval(poll, POLL_MS)
 }
 
 function stop() {
   token++
   if (timer) {
-    clearInterval(timer)
+    clearTimeout(timer)
     timer = null
   }
 }

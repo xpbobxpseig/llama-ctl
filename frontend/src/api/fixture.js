@@ -243,6 +243,11 @@ export const demoMarket = {
       files: [], state: 'done', received: 639446688, total: 639446688, speed_bps: 0,
       error: null, added_at_ms: 1,
     },
+    {
+      id: 'ms:unsloth/Qwen3.8-27B-GGUF:Q4_K_M', hub: 'ms', repo: 'unsloth/Qwen3.8-27B-GGUF', label: 'Q4_K_M',
+      files: [], state: 'running', received: 13532101888, total: 27931145952, speed_bps: 38157740,
+      error: null, added_at_ms: 2,
+    },
   ],
   local: {
     hardware: {
@@ -250,6 +255,8 @@ export const demoMarket = {
       ram_total: 68719476736,
       cpu_name: 'AMD Ryzen 9 9950X',
     },
+    // 下载根所在卷的剩余字节（local_scan.disk_free）；demo 与真机同形。
+    disk_free: 1073741824000,
     models: [
       {
         path: 'F:/AI_Model/Qwen3.8/Qwen3.8-27B-CRACK-IQ4_XS.gguf', size: 15546361472,
@@ -261,6 +268,11 @@ export const demoMarket = {
         path: 'F:/AI_Model/Qwen3.8-27B-Abliterated-Q4_K_M.gguf', size: 16810714496,
         label: 'Q4_K_M', is_sharded: false, mmproj: null,
         fit: { tier: 'full_gpu', reason: '权重 16.8GB（含 1.5GB 余量）≈ 显存 24.0GB 的 72%，可全量 offload', offload_ratio: 100 },
+      },
+      {
+        path: 'F:/AI_Model/Qwen/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf', size: 639446688,
+        label: 'Q8_0', is_sharded: false, mmproj: null,
+        fit: { tier: 'cpu_only', reason: '权重 0.6GB（含 1.5GB 余量）≈ 显存 24.0GB 的 3%，可全量 offload，但小模型受内存带宽限制', offload_ratio: 100 },
       },
     ],
     benchmarks: [

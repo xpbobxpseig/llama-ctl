@@ -525,8 +525,14 @@ pub async fn local_scan(handle: AppHandle, root: String) -> Result<OkPayload, Er
             hardware: market::Hardware,
             models: Vec<market::LocalModel>,
             benchmarks: Vec<llama_ctl_core::market::BenchRecord>,
+            // 下载根所在卷的剩余空间：None = 卷不可知（网络盘等），UI 隐藏该行。
+            disk_free: Option<u64>,
         }
-        Ok::<_, AppError>(LocalScan { models, hardware: hw, benchmarks: m.benchmarks() })
+        let disk_free = d
+            .disk_free(std::path::Path::new(&root))
+            .ok()
+            .flatten();
+        Ok::<_, AppError>(LocalScan { models, hardware: hw, benchmarks: m.benchmarks(), disk_free })
     })
     .await
 }

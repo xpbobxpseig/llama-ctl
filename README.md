@@ -21,6 +21,7 @@
 - 官方 llama.cpp 更新：检查 / 下载 / 备份 / 替换 / 回滚，全程需确认
 - 启动时后台清理官方更新的陈旧下载与备份（各保留最近 3 个），无确认、不打扰
 - 动效与主题：原生「精密仪器」风浅 / 深双主题（Segoe UI Variable + 单一森林绿交互色 + 发丝线分层，见 `docs/ui-redesign-v6.md`）、按钮驻留渐隐、视图 / 弹层入场动效、动效总开关（关闭后所有动画直跳终态）
+- 日志页轮询**自适应降占用**：紧跟档 1.5s，静默后退到 3s / 5s 上限，新行立刻回紧跟档（长挂日志页的 IPC 与读盘降到约三分之一）
 - 界面骨架文案中英双语（参数详解保持中文）
 
 ### 环境要求
@@ -80,10 +81,10 @@ cd ..
 
 - **发现**：热门榜（按下载量前 50，只收录 GGUF）+ 关键词搜索 + 「规模」下拉（全部 / ≥1B / ≥7B / ≥30B，默认 ≥1B 筛掉小模型）。双源可切换：魔搭 ModelScope（默认，国内 CDN 快 8.8×）/ HuggingFace，记住上次选择；HF gated 仓库标注「需授权」。
 - **详情**：按文件名把文件归组为量化档（主文件 / 分片组 / mmproj 投影），每档展示总体积与**四档适配等级**（流畅 = 全进显存 / 可行 = 大部分进显存（附估计 offload 比例）/ 勉强 = 主要靠内存 / 不建议），每级附一行依据（按权重估算，未计上下文对应的 KV 增长）。硬件检测走 DXGI 枚举 + 物理内存，无子进程。
-- **下载**：行内直接下单；自研流式引擎（独立于服务锁，40GB 下载期间参数页照常可用）：Range 断点续传、`.part` 原子转正、SHA256 校验（无校验和的仓库降级体积校验并明示）、失败指数退避重试、下载前磁盘空间预检、单任务队列、暂停 / 继续 / 取消、任务列表持久化（重启后从断点拉起）、失败原因就地红字显示。
-- **已下载**：扫描下载根目录（两层深，兼容子目录与平铺布局），每行含 体积 / 适配等级 / 实测成绩；操作：实测 / 启用 / 打开目录 / 删除（删除命中当前服务模型时强警告）。
+- **下载**：行内直接下单；自研流式引擎（独立于服务锁，40GB 下载期间参数页照常可用）：Range 断点续传、`.part` 原子转正、SHA256 校验（无校验和的仓库降级体积校验并明示）、失败指数退避重试、入队前磁盘空间预检（不足直接拒绝并明示缺口）、单任务队列、暂停 / 继续 / 取消、任务列表持久化（重启后从断点拉起）、失败原因就地红字显示；任务行实时显示速度与**预计剩余时间**。
+- **已下载**：扫描下载根目录（两层深，兼容子目录与平铺布局），区头按设备分行显示显卡 / 内存，并显示下载根所在卷的剩余空间；每行含 体积 / 适配等级 / 实测成绩；操作：实测 / 启用 / 打开目录 / 删除（删除命中当前服务模型时强警告）。
 - **实测**：服务在跑时确认后 停服 → `llama-bench -o json` → 按原状态恢复，成绩（pp512 / tg128）存档展示，同一模型不同量化档谁快一目了然。
-- **一键启用**：把模型路径（含 `--mmproj`）回填到参数表单并走既有 Apply——与手填路径完全同构，AppParameters 唯一真源不破；服务在跑时询问「立即重启」。
+- **一键启用**：把模型路径（含 `--mmproj`）回填到参数表单并走既有 Apply——与手填路径完全同构，AppParameters 唯一真源不破；服务在跑时询问「立即重启」；**下载完成的任务行内直接「启用」**（匹配到已下载条目时，行内确认后生效），不用滚去已下载区。
 - **设置页「市场」节**：HuggingFace / 魔搭令牌（手填）、下载根目录（默认 `F:\AI_Model`）。
 
 > 设计与实测依据：`docs/spec/model-marketplace.md`；下载引擎选型决策：`docs/adr/0004-self-hosted-gguf-downloader.md`。
@@ -206,6 +207,7 @@ A general-purpose Windows GUI that directly drives **any** llama.cpp service man
 - Official llama.cpp updates: check / download / back up / replace / roll back, with confirmation at every step
 - Background cleanup of stale update downloads and backups on startup (keeps the latest 3 of each), silent and non-blocking
 - Motion and theme: a native "precision instrument" light / dark theme (Segoe UI Variable, a single forest-green interaction hue, hairline layering — see `docs/ui-redesign-v6.md`), button hover fades, view / dialog entrance motion, and a global motion switch (off = every animation jumps to its end state)
+- Adaptive log-page polling to keep the footprint low: 1.5s while active, backing off to 3s / 5s when idle, instantly back to 1.5s on new lines (roughly a third of the idle IPC and file reads)
 - Bilingual UI chrome in Chinese and English (parameter guides stay Chinese)
 
 ### Requirements
@@ -265,10 +267,10 @@ The "Market" view at the bottom of the sidebar brings the GGUF acquisition loop 
 
 - **Discover**: a trending list (top 50 by downloads, GGUF only) + keyword search + a "Size" dropdown (All / ≥1B / ≥7B / ≥30B; ≥1B by default filters out tiny models). Two switchable sources: ModelScope (default, 8.8× faster CDN in China) / HuggingFace, with the last choice remembered; HF gated repos are badged "Gated".
 - **Detail**: files are grouped into quant tiers by filename (main file / shard group / mmproj projector); each tier shows its total size and a **four-tier fitness rating** (Great = fully in VRAM / OK = mostly in VRAM (with an estimated offload ratio) / Slow = mostly system RAM / No = not recommended), each with a one-line rationale (weight-based estimate, KV growth not included). Hardware detection uses DXGI enumeration + physical memory, no subprocesses.
-- **Download**: order inline from the tier row; a self-built streaming engine (fully isolated from the service lock — the params page stays usable during a 40 GB download): Range resume, `.part` atomic promotion, SHA256 verification (repos without checksums degrade to size checks, stated explicitly), exponential-backoff retries, disk-space precheck, a single-task queue, pause / resume / cancel, a persisted task list (resumes from the breakpoint after a restart), and inline red failure reasons.
-- **Downloaded**: scans the download root (two levels deep, both subdirectory and flat layouts), each row with size / fitness / benchmark scores; actions: benchmark / enable / open folder / delete (deleting the model currently in use raises a strong warning).
+- **Download**: order inline from the tier row; a self-built streaming engine (fully isolated from the service lock — the params page stays usable during a 40 GB download): Range resume, `.part` atomic promotion, SHA256 verification (repos without checksums degrade to size checks, stated explicitly), exponential-backoff retries, a disk-space precheck at enqueue time (insufficient space is rejected up front with the exact gap), a single-task queue, pause / resume / cancel, a persisted task list (resumes from the breakpoint after a restart), inline red failure reasons, and live speed with an **estimated time remaining** on each task row.
+- **Downloaded**: scans the download root (two levels deep, both subdirectory and flat layouts); the section head lists GPUs / RAM one device per row plus the free space on the download volume; each row with size / fitness / benchmark scores; actions: benchmark / enable / open folder / delete (deleting the model currently in use raises a strong warning).
 - **Benchmark**: with the service running, confirm first, then stop service → `llama-bench -o json` → restore the original state; scores (pp512 / tg128) are archived so you can compare quant tiers of the same model at a glance.
-- **One-click enable**: fills the model path (including `--mmproj`) into the parameter form and goes through the existing Apply — identical to typing the path by hand, keeping AppParameters the single source of truth; asks "restart now" when the service is running.
+- **One-click enable**: fills the model path (including `--mmproj`) into the parameter form and goes through the existing Apply — identical to typing the path by hand, keeping AppParameters the single source of truth; asks "restart now" when the service is running; **completed task rows offer "Enable" inline** (when a downloaded entry matches, confirmed inline) — no scrolling to the Downloaded section.
 - **Settings "Market" section**: HuggingFace / ModelScope tokens (manual entry), download root (default `F:\AI_Model`).
 
 > Design and measured facts: `docs/spec/model-marketplace.md`; download-engine decision: `docs/adr/0004-self-hosted-gguf-downloader.md`.

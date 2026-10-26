@@ -152,6 +152,25 @@ impl DownloadManager {
                     format!("任务已存在：{}", task.id),
                 ));
             }
+            // 工单 11：入队前预检目标盘剩余空间——下到 30GB 才报磁盘满是浪费。
+            // 口径按第一个文件的落盘卷；卷不可知（None）时不拦，缺答案不该
+            // 变成硬错误（UI 侧磁盘行同样按 None 隐藏）。
+            if let Some(dest) = task.files.first().map(|f| &f.dest) {
+                if let Ok(Some(free)) = deps.disk_free(dest) {
+                    let need: u64 = task.files.iter().map(|f| f.size).sum();
+                    if free < need {
+                        return Err(AppError::new(
+                            AppErrorKind::MarketFailed,
+                            format!(
+                                "磁盘空间不足：需要 {}，剩余 {}（缺口 {}）",
+                                super::hwinfo::gb(need),
+                                super::hwinfo::gb(free),
+                                super::hwinfo::gb(need - free),
+                            ),
+                        ));
+                    }
+                }
+            }
             self.flags
                 .lock()
                 .unwrap()

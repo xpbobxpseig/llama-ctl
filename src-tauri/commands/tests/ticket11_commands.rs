@@ -201,6 +201,9 @@ impl Deps for Sc<'_> {
     fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
         self.inner.hash_file(path)
     }
+    fn disk_free(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.inner.disk_free(path)
+    }
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {
         self.inner.probe_health(host, port)
     }
