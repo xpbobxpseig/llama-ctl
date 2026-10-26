@@ -24,3 +24,12 @@ const app = createApp(DesignApp)
 // command would reject; the store swaps in the fixture instead, and the shell
 // labels it as demo data on screen. Nothing else changes.
 app.mount('#app')
+
+// 开发专用的界面标注层：`?annotate=1` 时在真实界面上浮一层评审工具
+// （点选元素写反馈、导出 Markdown）。生产壳不带 query 且非 DEV，分支
+// 不可达；动态 import 让它永远不进主包。
+if (import.meta.env.DEV && new URLSearchParams(location.search).has('annotate')) {
+  import('./design/annotate.js')
+    .then((m) => m.startAnnotate())
+    .catch(() => {})
+}

@@ -22,6 +22,8 @@ import { listen } from '@tauri-apps/api/event'
 /** The two progress streams `restart` and `install_update` emit on. */
 export const EVENT_RESTART = 'llama-ctl://restart-progress'
 export const EVENT_UPDATE = 'llama-ctl://update-progress'
+export const EVENT_MARKET = 'llama-ctl://download-progress'
+export const EVENT_BENCH = 'llama-ctl://bench-progress'
 
 /** An error that came back over the wire, with its branchable `kind`. */
 export class CommandError extends Error {
@@ -84,10 +86,11 @@ export const refreshServices = () => call('refresh_services')
  * @param {boolean} backup store it as a timestamped preset first
  */
 export const switchService = (service, values = null, backup = false) =>
-  call('switch_service', { service, values, backup })
+  call('switch_service', { args: { service, values, backup } })
 
 /** Apply the form: rebuild `AppParameters` and write it back. */
-export const applyChanges = (values, extras = []) => call('apply_changes', { values, extras })
+export const applyChanges = (values, extras = []) =>
+  call('apply_changes', { args: { values, extras } })
 
 /** Revert: discard the form and read the service again. Never writes. */
 export const revert = () => call('revert')
@@ -105,7 +108,7 @@ export const restart = (values = null) => call('restart', { values })
 export const loadPreset = (name) => call('load_preset', { name })
 
 /** Save the form as a preset. `false` when the name already exists. */
-export const savePreset = (name, values) => call('save_preset', { name, values })
+export const savePreset = (name, values) => call('save_preset', { args: { name, values } })
 
 /** Delete a preset. `false` when there was nothing to delete. */
 export const deletePreset = (name) => call('delete_preset', { name })
@@ -125,6 +128,21 @@ export const pruneUpdateDirs = () => call('prune_update_dirs')
 /** `true` when the form differs semantically from the service. */
 export const isDirty = (values) => call('is_dirty', { values })
 
+// ---- market（模型市场）------------------------------------------------------
+
+export const marketHot = (hub, limit = 50) => call('market_hot', { hub, limit })
+export const marketSearch = (hub, query, limit = 50) => call('market_search', { args: { hub, query, limit } })
+export const marketRepo = (hub, id) => call('market_repo', { hub, id })
+export const marketTasks = () => call('market_tasks')
+export const marketEnqueue = (args) => call('market_enqueue', { args })
+export const marketPause = (id) => call('market_pause', { id })
+export const marketResume = (id) => call('market_resume', { id })
+export const marketCancel = (id) => call('market_cancel', { id })
+export const benchRun = (modelPath) => call('bench_run', { args: { model_path: modelPath } })
+export const localScan = (root) => call('local_scan', { root })
+export const localDelete = (model, currentModel = null) =>
+  call('local_delete', { args: { model, current_model: currentModel } })
+
 // ---- progress --------------------------------------------------------------
 
 /**
@@ -137,6 +155,16 @@ export const isDirty = (values) => call('is_dirty', { values })
  */
 export function onProgress(event, onLine) {
   return listen(event, (e) => onLine(String(e.payload ?? '')))
+}
+
+/** 下载进度事件：payload 是全量任务列表（不是行文本）。 */
+export function onMarketTasks(onTasks) {
+  return listen(EVENT_MARKET, (e) => onTasks(Array.isArray(e.payload) ? e.payload : []))
+}
+
+/** 实测进度事件：行流，与 restart/update 同构。 */
+export function onBenchLine(onLine) {
+  return listen(EVENT_BENCH, (e) => onLine(String(e.payload ?? '')))
 }
 
 // ---- environment -----------------------------------------------------------

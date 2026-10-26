@@ -25,6 +25,7 @@ import LogsView from './LogsView.vue'
 import PresetsView from './PresetsView.vue'
 import SettingsView from './SettingsView.vue'
 import AboutView from './AboutView.vue'
+import MarketView from './MarketView.vue'
 import './design.css'
 
 const lang = computed(() => store.lang.value)
@@ -48,7 +49,11 @@ const showTools = computed(() => view.value === 'params' && !noService.value)
 
 // ---- 计数 ---------------------------------------------------------------
 
-const svcValues = computed(() => store.snapshot.snap?.values ?? {})
+// 差异的基准是服务的当前参数（service_values），不是表单/预填写——
+// 载入预设后两者不同；旧快照没有该字段时退回 values。
+const svcValues = computed(
+  () => store.snapshot.snap?.service_values ?? store.snapshot.snap?.values ?? {},
+)
 
 function changed(field) {
   return String(store.values.value[field.key] ?? '') !== String(svcValues.value[field.key] ?? '')
@@ -78,6 +83,24 @@ const healthText = computed(() => {
 const portText = computed(() => (store.values.value.port ? `:${store.values.value.port}` : ''))
 
 const selected = computed(() => store.selected.value)
+
+/** llama.cpp 安装目录（「打开安装目录」的目标；没有就保持禁用）。 */
+const appDir = computed(() => String(store.snapshot.snap?.facts?.app_dir ?? ''))
+
+async function openInstallDir() {
+  if (!appDir.value) return
+  if (!ipc.isTauri()) {
+    // demo：落一行日志作反馈，绝不让点击看起来「没反应」
+    store.pushLog(`[demo] 将打开安装目录 ${appDir.value}`)
+    return
+  }
+  try {
+    const { openPath } = await import('@tauri-apps/plugin-opener')
+    await openPath(appDir.value)
+  } catch {
+    // 能力缺失：不炸界面
+  }
+}
 
 // ---- 菜单 ---------------------------------------------------------------
 
@@ -189,9 +212,11 @@ async function doSwitch(name) {
 }
 
 async function doLoad(name) {
+  // load_preset 的 Snapshot 已经把预设值作为表单带回（editing=Some(preset)）。
+  // 这里绝不能再 refresh——refresh 以 editing=None 拉快照，拿回的是服务当前
+  // 参数，会把刚填进表单的预设值当场冲掉（「预设是摆设」的根因）。
   const snap = await store.run('load_preset', () => ipc.loadPreset(name))
-  store.clearForm()
-  if (snap) await store.refresh()
+  if (snap) store.clearForm()
 }
 
 async function doSave() {
@@ -399,6 +424,10 @@ watch(
         <div class="rail-spacer"></div>
 
         <div class="rail-foot">
+          <button class="nav" data-view="market" :aria-current="String(view === 'market')" @click="go('market')">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6.5h13l-1.2 9a1.6 1.6 0 0 1-1.6 1.4H6.3a1.6 1.6 0 0 1-1.6-1.4z" /><path d="M7 8.5V5.4a3 3 0 0 1 6 0v3.1" /></svg>
+            <span class="label">{{ tr('market') }}</span>
+          </button>
           <button class="nav" data-view="settings" :aria-current="String(view === 'settings')" @click="go('settings')">
             <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="2.6" /><path d="M10 2.6v2M10 15.4v2M2.6 10h2M15.4 10h2M4.8 4.8l1.4 1.4M13.8 13.8l1.4 1.4M15.2 4.8l-1.4 1.4M6.2 13.8l-1.4 1.4" /></svg>
             <span class="label">{{ tr('settings') }}</span>
@@ -414,6 +443,7 @@ watch(
             <button type="button" data-filter="all" :aria-pressed="String(filter === 'all')" @click="filter = 'all'">{{ tr('all') }}</button>
             <button type="button" data-filter="changed" :aria-pressed="String(filter === 'changed')" @click="filter = 'changed'">{{ tr('changed') }} <span>{{ dirtyCount }}</span></button>
           </div>
+          <button class="textbtn savepreset" type="button" @click="openSave">{{ tr('savePreset') }}</button>
         </div>
       </aside>
 
@@ -432,7 +462,7 @@ watch(
             <button class="ghost" type="button" :title="tr('restartSvc')" :aria-label="tr('restartSvc')" :disabled="noService" @click="openRestart">
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a6 6 0 1 1-1.9-4.4" /><path d="M16 4.2v3.4h-3.4" /></svg>
             </button>
-            <button class="ghost" type="button" :title="tr('openDir')" :aria-label="tr('openDir')" disabled>
+            <button class="ghost" type="button" :title="tr('openDir')" :aria-label="tr('openDir')" :disabled="!appDir" @click="openInstallDir">
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3l1.6 2h6.4A1.5 1.5 0 0 1 17 8.5v6A1.5 1.5 0 0 1 15.5 16h-11A1.5 1.5 0 0 1 3 14.5z" /></svg>
             </button>
             <div class="wc">
@@ -456,6 +486,7 @@ watch(
             <LogsView v-else-if="view === 'logs'" />
             <PresetsView v-else-if="view === 'presets'" @load="onLoadPreset" @remove="openDelete" @save="openSave" />
             <SettingsView v-else-if="view === 'settings'" />
+            <MarketView v-else-if="view === 'market'" />
             <AboutView
               v-else-if="view === 'about'"
               @license="openLicense"

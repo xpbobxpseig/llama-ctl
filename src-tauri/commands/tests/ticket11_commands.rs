@@ -27,7 +27,7 @@ use llama_ctl_commands::snapshot::{
     install_update, load_preset, prune_update_dirs, refresh_services, restart, revert,
     save_preset, save_settings, service_action, set_start_mode, snapshot, switch_service,
 };
-use llama_ctl_core::deps::{HttpBody, AppErrorKind, Deps, DepsError, DepsErrorKind, RegHive};
+use llama_ctl_core::deps::{HttpBody, HttpStream, AppErrorKind, Deps, DepsError, DepsErrorKind, RegHive};
 use llama_ctl_core::fake::{Call, FakeDeps};
 use llama_ctl_core::install::{InstallEnv, STOPPED_STATE};
 use llama_ctl_core::params::{build_params, semantically_equal};
@@ -182,6 +182,24 @@ impl Deps for Sc<'_> {
     }
     fn http_get(&self, url: &str) -> Result<HttpBody, DepsError> {
         self.inner.http_get(url)
+    }
+    fn spawn_split(&self, program: &str, args: &[&str]) -> Result<(Vec<u8>, Vec<u8>), DepsError> {
+        self.inner.spawn_split(program, args)
+    }
+    fn http_request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Vec<u8>, DepsError> {
+        self.inner.http_request(method, url, body)
+    }
+    fn http_open_range(&self, url: &str, range_from: u64) -> Result<HttpStream, DepsError> {
+        self.inner.http_open_range(url, range_from)
+    }
+    fn append_file(&self, path: &Path, bytes: &[u8]) -> Result<(), DepsError> {
+        self.inner.append_file(path, bytes)
+    }
+    fn file_size(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.inner.file_size(path)
+    }
+    fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
+        self.inner.hash_file(path)
     }
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {
         self.inner.probe_health(host, port)

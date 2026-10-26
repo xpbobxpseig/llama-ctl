@@ -7,10 +7,11 @@
  * 值来自 Snapshot 的 settings，Rust 落盘后下一次快照才让控件动。
  * 字体三项走 `font.js`（localStorage，呈现层偏好），缩放是五档步进滑条。
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import * as store from '../stores/snapshot.js'
 import * as theme from '../stores/theme.js'
 import * as update from '../stores/update.js'
+import * as ipc from '../api/ipc.js'
 import * as font from '../design/font.js'
 import { t } from './copy.js'
 import Dd from './Dd.vue'
@@ -54,6 +55,36 @@ const monoFontOptions = computed(() => [
   { value: 'Courier New', label: 'Courier New' },
   { value: 'NSimSun', label: '新宋体' },
 ])
+
+// ---- 市场（下载根目录 / 访问令牌）：改动在 change 时经 save_settings 落盘 ----
+
+const marketRoot = ref('')
+const hfToken = ref('')
+const msToken = ref('')
+
+watch(
+  () => store.settings.value,
+  (s) => {
+    if (!s || marketRoot.value) return
+    marketRoot.value = s.market_download_root || 'F:\AI_Model'
+    hfToken.value = s.market_hf_token || ''
+    msToken.value = s.market_ms_token || ''
+  },
+  { immediate: true },
+)
+
+async function saveMarket() {
+  const s = store.settings.value
+  if (!s) return
+  await store.run('save_settings', () =>
+    ipc.saveSettings({
+      ...s,
+      market_download_root: marketRoot.value.trim() || 'F:\AI_Model',
+      market_hf_token: hfToken.value.trim(),
+      market_ms_token: msToken.value.trim(),
+    }),
+  )
+}
 
 const steps = font.SCALE_STEPS
 const scaleIdx = computed(() => {
@@ -204,5 +235,38 @@ function onAppearance(value) {
         @click="update.setAutoOnStartup(!checkOnStart)"
       ><i></i></button>
     </span>
+  </div>
+
+  <div class="section">{{ tr('marketSec') }}</div>
+  <div class="lrow">
+    <span class="lname">{{ tr('marketRoot') }}</span>
+    <span class="r"><input
+      v-model="marketRoot"
+      class="nameinput"
+      type="text"
+      spellcheck="false"
+      @change="saveMarket"
+    /></span>
+  </div>
+  <div class="lrow">
+    <span class="lname">{{ tr('marketHfToken') }}</span>
+    <span class="r"><input
+      v-model="hfToken"
+      class="nameinput"
+      type="text"
+      spellcheck="false"
+      placeholder="hf_…"
+      @change="saveMarket"
+    /></span>
+  </div>
+  <div class="lrow">
+    <span class="lname">{{ tr('marketMsToken') }}</span>
+    <span class="r"><input
+      v-model="msToken"
+      class="nameinput"
+      type="text"
+      spellcheck="false"
+      @change="saveMarket"
+    /></span>
   </div>
 </template>

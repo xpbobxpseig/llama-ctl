@@ -13,7 +13,7 @@
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use llama_ctl_core::deps::{HttpBody, AppErrorKind, AppResult, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
+use llama_ctl_core::deps::{HttpBody, HttpStream, AppErrorKind, AppResult, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
 use llama_ctl_core::fake::{Call, FakeDeps};
 use llama_ctl_core::install::{
     DEFAULT_LLAMA_DIR, InstallEnv, InstallPaths, InstallResult, REFRESH_SENTINEL, STOPPED_STATE,
@@ -113,6 +113,24 @@ fn state_line(state: &str) -> Vec<u8> {
 }
 
 impl Deps for ScriptedSc<'_> {
+    fn http_request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Vec<u8>, DepsError> {
+        self.inner.http_request(method, url, body)
+    }
+    fn spawn_split(&self, program: &str, args: &[&str]) -> Result<(Vec<u8>, Vec<u8>), DepsError> {
+        self.inner.spawn_split(program, args)
+    }
+    fn http_open_range(&self, url: &str, range_from: u64) -> Result<HttpStream, DepsError> {
+        self.inner.http_open_range(url, range_from)
+    }
+    fn append_file(&self, path: &Path, bytes: &[u8]) -> Result<(), DepsError> {
+        self.inner.append_file(path, bytes)
+    }
+    fn file_size(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.inner.file_size(path)
+    }
+    fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
+        self.inner.hash_file(path)
+    }
     /// Records through the inner fake, then answers `sc` itself.
     fn spawn(&self, program: &str, args: &[&str]) -> Result<Vec<u8>, DepsError> {
         let recorded = self.inner.spawn(program, args);

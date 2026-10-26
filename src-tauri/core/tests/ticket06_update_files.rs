@@ -10,7 +10,7 @@
 //! replacement must leave the previous file byte-identical.
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
-use llama_ctl_core::deps::{HttpBody, AppErrorKind, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
+use llama_ctl_core::deps::{HttpBody, HttpStream, AppErrorKind, Deps, DepsError, DepsErrorKind, DirEntry, RegHive};
 use llama_ctl_core::fake::{Call, FakeDeps};
 use llama_ctl_core::update_files::{
     DownloadOptions, PART_SUFFIX, PRUNE_KEEP, backup_dir, backup_files, cleanup_stale_dirs,
@@ -283,6 +283,24 @@ struct FlakyNet<'a> {
 impl Deps for FlakyNet<'_> {
     fn spawn(&self, program: &str, args: &[&str]) -> Result<Vec<u8>, DepsError> {
         self.inner.spawn(program, args)
+    }
+    fn http_request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Vec<u8>, DepsError> {
+        self.inner.http_request(method, url, body)
+    }
+    fn spawn_split(&self, program: &str, args: &[&str]) -> Result<(Vec<u8>, Vec<u8>), DepsError> {
+        self.inner.spawn_split(program, args)
+    }
+    fn http_open_range(&self, url: &str, range_from: u64) -> Result<HttpStream, DepsError> {
+        self.inner.http_open_range(url, range_from)
+    }
+    fn append_file(&self, path: &Path, bytes: &[u8]) -> Result<(), DepsError> {
+        self.inner.append_file(path, bytes)
+    }
+    fn file_size(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.inner.file_size(path)
+    }
+    fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
+        self.inner.hash_file(path)
     }
     fn reg_read_dword(
         &self,

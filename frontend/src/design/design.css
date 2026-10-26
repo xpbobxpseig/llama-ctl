@@ -636,3 +636,167 @@ html.mica-host, html.mica-host body, html.mica-host #app { background: transpare
 .d5 .grips .g-ne { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
 .d5 .grips .g-sw { bottom: 0; left: 0; width: 10px; height: 10px; cursor: nesw-resize; }
 .d5 .grips .g-se { bottom: 0; right: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+
+/* ---- market（模型市场）---------------------------------------------------- */
+
+.d5 .market-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap; /* 窄窗时换行而不是互相挤压 */
+}
+.d5 .market-head .hubdd {
+  width: 190px;
+}
+.d5 .market-head .search {
+  flex: 1;
+  min-width: 120px;
+}
+/* 量级筛选的标签：seg 时代用户看不懂这控件在筛什么，点名意图 */
+.d5 .market-head .mlabel {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.d5 .market-head .mindd {
+  width: 118px;
+}
+.d5 .mrow {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  margin: 0 0 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: default;
+}
+.d5 .mrow.repo {
+  cursor: pointer;
+}
+.d5 .mrow.repo:hover {
+  background: var(--hover);
+}
+.d5 .mrow.back {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.d5 .mrow .nm {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-right: 8px;
+}
+.d5 .mrow .fl,
+.d5 .mrow .dim {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 8px;
+}
+.d5 .mrow .mono {
+  font-family: var(--d5-mono);
+  font-size: 12px;
+}
+.d5 .mrow .why {
+  font-size: 12px;
+  color: var(--text2);
+  margin: 4px 0 6px;
+}
+.d5 .mrow .vmain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.d5 .mrow .vops {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.d5 .mrow .ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text2);
+  margin: 6px 0 0;
+}
+.d5 .fit {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.d5 .fit-fit-full,
+.d5 .fit-full {
+  color: var(--run);
+}
+.d5 .fit-partial {
+  color: var(--warn);
+}
+.d5 .fit-cpu {
+  color: var(--gray);
+}
+.d5 .fit-fit-no,
+.d5 .fit-no,
+.d5 .f-gated {
+  color: var(--err);
+}
+.d5 .f-gated {
+  border-style: dashed;
+}
+.d5 .pbar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--field);
+  margin: 6px 0 4px;
+  overflow: hidden;
+}
+.d5 .pfill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--switch);
+  transition: width 0.3s ease;
+}
+.d5 .bench {
+  margin-left: 4px;
+}
+.d5 .ok-line {
+  color: var(--run);
+}
+
+/* 已下载区的硬件行：每个设备一行，键是 UI 字眉标、值走等宽（v6 规则：
+   等宽字只给数据）。显存/内存是适配等级的判定依据，必须一眼读清。 */
+.d5 .hwmeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+}
+.d5 .hwmeta .hwrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 22px;
+}
+.d5 .hwmeta .hwk {
+  flex: none;
+  width: 40px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.d5 .hwmeta .hwv {
+  font-family: var(--d5-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

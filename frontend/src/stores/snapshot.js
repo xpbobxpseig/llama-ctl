@@ -180,6 +180,8 @@ export async function run(name, task, apply) {
     // A failed command keeps the last good snapshot on screen and surfaces the
     // line — a white window or a silently reverted form would be worse.
     setError(err)
+    // 诊断模式：每条命令的失败连同命令名与完整错误行进日志页，可回溯。
+    pushLog(`[诊断] ${name} 失败 · ${ipc.errorLine(err)}`)
     return null
   } finally {
     state.busy = ''

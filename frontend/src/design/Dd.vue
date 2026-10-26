@@ -13,6 +13,10 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
+// 模板是「按钮 + Teleport」两个根节点，Vue 不做自动 attrs 透传——
+// 不显式接管的话，外面传的 class（市场页的 hubdd/mindd 宽度）会静默丢掉。
+defineOptions({ inheritAttrs: false })
+
 const props = defineProps({
   /** 当前值（字符串；空串是一个合法选项） */
   modelValue: { type: String, default: '' },
@@ -131,6 +135,7 @@ let openOwner = null
 <template>
   <button
     ref="btnEl"
+    v-bind="$attrs"
     class="selbtn"
     :class="{ bare }"
     type="button"

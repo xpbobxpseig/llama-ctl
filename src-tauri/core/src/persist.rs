@@ -46,10 +46,12 @@ use crate::updater::DEFAULT_CHANNEL;
 pub const USER_DATA_DIRNAME: &str = "llama-ctl";
 pub const SETTINGS_BASENAME: &str = "settings.json";
 pub const PRESETS_BASENAME: &str = "presets.json";
+pub const MARKET_BASENAME: &str = "market.json";
 
 /// Environment overrides, higher priority than the user data dir.
 pub const SETTINGS_OVERRIDE_ENV: &str = "LLAMA_CTL_SETTINGS";
 pub const PRESETS_OVERRIDE_ENV: &str = "LLAMA_CTL_PRESETS";
+pub const MARKET_OVERRIDE_ENV: &str = "LLAMA_CTL_MARKET";
 
 /// Environment the path resolution reads. Injectable so tests never mutate
 /// the real process environment (which is global, and racy under `cargo test`).
@@ -59,6 +61,7 @@ pub struct Env {
     pub userprofile: Option<String>,
     pub settings_override: Option<String>,
     pub presets_override: Option<String>,
+    pub market_override: Option<String>,
 }
 
 impl Env {
@@ -73,6 +76,7 @@ impl Env {
             userprofile: var("USERPROFILE"),
             settings_override: var(SETTINGS_OVERRIDE_ENV),
             presets_override: var(PRESETS_OVERRIDE_ENV),
+            market_override: var(MARKET_OVERRIDE_ENV),
         }
     }
 }
@@ -137,6 +141,14 @@ pub struct Settings {
     pub upd_channel: String,
     /// Last enumerated NSSM service names, so the first frame can render.
     pub services: Vec<String>,
+    /// 模型市场：下载根目录（默认 F:\AI_Model）。
+    pub market_download_root: String,
+    /// HuggingFace 访问令牌（gated 仓库兜底）。
+    pub market_hf_token: String,
+    /// 魔搭访问令牌。
+    pub market_ms_token: String,
+    /// 上次使用的模型源："ms" | "hf"。
+    pub market_last_hub: String,
 }
 
 impl Default for Settings {
@@ -151,6 +163,10 @@ impl Default for Settings {
             upd_check_on_startup: true,
             upd_channel: DEFAULT_CHANNEL.to_string(),
             services: Vec::new(),
+            market_download_root: r"F:\AI_Model".to_string(),
+            market_hf_token: String::new(),
+            market_ms_token: String::new(),
+            market_last_hub: "ms".to_string(),
         }
     }
 }
@@ -195,6 +211,18 @@ pub fn load_settings(d: &impl Deps, env: &Env) -> Settings {
         // dropped rather than carried into the dropdown.
         out.services = items.iter().filter_map(Value::as_str).map(str::to_string).collect();
     }
+    if let Some(v) = map.get("market_download_root").and_then(Value::as_str) {
+        out.market_download_root = v.to_string();
+    }
+    if let Some(v) = map.get("market_hf_token").and_then(Value::as_str) {
+        out.market_hf_token = v.to_string();
+    }
+    if let Some(v) = map.get("market_ms_token").and_then(Value::as_str) {
+        out.market_ms_token = v.to_string();
+    }
+    if let Some(v) = map.get("market_last_hub").and_then(Value::as_str) {
+        out.market_last_hub = v.to_string();
+    }
     out
 }
 
@@ -219,6 +247,10 @@ pub fn save_settings(d: &impl Deps, env: &Env, settings: &Settings) -> Result<()
         "services".to_string(),
         Value::Array(settings.services.iter().cloned().map(Value::String).collect()),
     );
+    map.insert("market_download_root".to_string(), Value::String(settings.market_download_root.clone()));
+    map.insert("market_hf_token".to_string(), Value::String(settings.market_hf_token.clone()));
+    map.insert("market_ms_token".to_string(), Value::String(settings.market_ms_token.clone()));
+    map.insert("market_last_hub".to_string(), Value::String(settings.market_last_hub.clone()));
     write_atomic(d, &resolve_settings_file(env), &to_json_bytes(&map))
 }
 
@@ -305,7 +337,7 @@ pub fn load_preset_values(d: &impl Deps, env: &Env, name: &str) -> Option<Preset
 /// The parent directory is created first (first run / moved install dir). A
 /// failure at either step returns an `AppError` after removing the temp file —
 /// it never panics and never leaves a partial file where the real one was.
-pub fn write_atomic(d: &impl Deps, target: &Path, contents: &[u8]) -> Result<(), AppError> {
+pub fn write_atomic(d: &dyn Deps, target: &Path, contents: &[u8]) -> Result<(), AppError> {
     let tmp = tmp_path(target);
     if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()

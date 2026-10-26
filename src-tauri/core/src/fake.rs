@@ -3,11 +3,11 @@
 //! Lives in the crate (not behind `#[cfg(test)]`) so integration tests in
 //! `tests/` can use it too — that is where the migrated domain tests will go.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, HttpBody, RegHive};
+use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, HttpBody, HttpStream, RegHive};
 
 /// One recorded invocation. Tests assert on these, e.g. "facts() spawned
 /// nothing" becomes `fake.calls().iter().any(|c| c.is_spawn())`.
@@ -23,6 +23,11 @@ pub enum Call {
     ListDir(PathBuf),
     CreateDirAll(PathBuf),
     HttpGet(String),
+    HttpRequest { method: String, url: String, body: Option<String> },
+    HttpOpenRange { url: String, range_from: u64 },
+    AppendFile { path: PathBuf, len: usize },
+    HashFile(PathBuf),
+    FileSize(PathBuf),
     ProbeHealth { host: String, port: u16 },
 }
 
@@ -43,11 +48,25 @@ pub struct FakeDeps {
     files: RefCell<HashMap<PathBuf, Vec<u8>>>,
     dirs: HashMap<PathBuf, Vec<DirEntry>>,
     http: HashMap<String, Result<HttpBody, DepsError>>,
+    http_req: HashMap<String, Result<HttpBody, DepsError>>,
+    http_range: HashMap<String, RangeScript>,
     health: HashMap<(String, u16), bool>,
     now: u64,
     /// Simulated failures, applied by path so a test can make exactly one
     /// write fail and assert the transaction rolled back.
     failing_writes: HashMap<PathBuf, DepsError>,
+}
+
+/// Scripted download stream for [`Deps::http_open_range`]. `fail_first_after`
+/// makes the *first* open die mid-read after N bytes (simulating a reset
+/// connection); `no_resume` makes every open answer a plain `200` as if the
+/// server ignored `Range`.
+#[derive(Debug, Default)]
+pub struct RangeScript {
+    pub data: Vec<u8>,
+    pub fail_first_after: Option<usize>,
+    pub no_resume: bool,
+    opens: Cell<u32>,
 }
 
 impl FakeDeps {
@@ -87,6 +106,19 @@ impl FakeDeps {
         self
     }
 
+    /// Script a [`Deps::http_request`] call, keyed by `"{method} {url}"`. The
+    /// request body is recorded (see `calls()`) but not part of the key.
+    pub fn with_http_req(
+        mut self,
+        method: &str,
+        url: &str,
+        body: Result<Vec<u8>, DepsError>,
+    ) -> Self {
+        self.http_req
+            .insert(format!("{method} {url}"), body.map(|b| HttpBody::new(b, None)));
+        self
+    }
+
     /// Same as [`with_http`] but declaring a `Content-Length`, which is what
     /// makes percentage progress testable.
     pub fn with_http_len(
@@ -97,6 +129,33 @@ impl FakeDeps {
     ) -> Self {
         self.http
             .insert(url.to_string(), body.map(|b| HttpBody::new(b, content_length)));
+        self
+    }
+
+    /// Script a [`Deps::http_open_range`] download supporting `Range`.
+    pub fn with_http_range(mut self, url: &str, data: Vec<u8>) -> Self {
+        self.http_range.insert(
+            url.to_string(),
+            RangeScript { data, ..RangeScript::default() },
+        );
+        self
+    }
+
+    /// Same, but the server ignores `Range` and always answers `200`.
+    pub fn with_http_range_no_resume(mut self, url: &str, data: Vec<u8>) -> Self {
+        self.http_range.insert(
+            url.to_string(),
+            RangeScript { data, no_resume: true, ..RangeScript::default() },
+        );
+        self
+    }
+
+    /// Same, but the first open dies mid-read after `fail_after` bytes.
+    pub fn with_http_range_flaky(mut self, url: &str, data: Vec<u8>, fail_after: usize) -> Self {
+        self.http_range.insert(
+            url.to_string(),
+            RangeScript { data, fail_first_after: Some(fail_after), ..RangeScript::default() },
+        );
         self
     }
 
@@ -135,6 +194,34 @@ impl FakeDeps {
     }
 }
 
+/// Stream over scripted download bytes, dying mid-read once `fail_after`
+/// bytes have been served (a scripted connection reset).
+struct ScriptedReader {
+    data: Vec<u8>,
+    pos: usize,
+    fail_after: Option<usize>,
+}
+
+impl std::io::Read for ScriptedReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if let Some(fa) = self.fail_after {
+            if self.pos >= fa {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "scripted connection reset",
+                ));
+            }
+        }
+        let mut n = buf.len().min(self.data.len() - self.pos);
+        if let Some(fa) = self.fail_after {
+            n = n.min(fa - self.pos); // 先把 fail_after 字节内的给完，下一次 read 才断
+        }
+        buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
 impl Deps for FakeDeps {
     fn spawn(&self, program: &str, args: &[&str]) -> Result<Vec<u8>, DepsError> {
         self.calls.borrow_mut().push(Call::Spawn {
@@ -145,6 +232,18 @@ impl Deps for FakeDeps {
             Some(Ok(b)) => Ok(b.clone()),
             Some(Err(e)) => Err(e.clone()),
             None => Ok(Vec::new()),
+        }
+    }
+
+    fn spawn_split(&self, program: &str, args: &[&str]) -> Result<(Vec<u8>, Vec<u8>), DepsError> {
+        self.calls.borrow_mut().push(Call::Spawn {
+            program: program.to_string(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+        });
+        match self.spawn_out.get(program) {
+            Some(Ok(b)) => Ok((b.clone(), Vec::new())),
+            Some(Err(e)) => Err(e.clone()),
+            None => Ok((Vec::new(), Vec::new())),
         }
     }
 
@@ -231,6 +330,87 @@ impl Deps for FakeDeps {
             Some(Err(e)) => Err(e.clone()),
             None => Err(DepsError::new(DepsErrorKind::Network, format!("unscripted url: {url}"))),
         }
+    }
+
+    fn http_request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Vec<u8>, DepsError> {
+        self.calls.borrow_mut().push(Call::HttpRequest {
+            method: method.to_string(),
+            url: url.to_string(),
+            body: body.map(|b| b.to_string()),
+        });
+        let key = format!("{method} {url}");
+        match self.http_req.get(&key) {
+            Some(Ok(b)) => Ok(b.bytes.clone()),
+            Some(Err(e)) => Err(e.clone()),
+            None => Err(DepsError::new(
+                DepsErrorKind::Network,
+                format!("unscripted request: {key}"),
+            )),
+        }
+    }
+
+    fn http_open_range(&self, url: &str, range_from: u64) -> Result<HttpStream, DepsError> {
+        self.calls.borrow_mut().push(Call::HttpOpenRange {
+            url: url.to_string(),
+            range_from,
+        });
+        let Some(script) = self.http_range.get(url) else {
+            return Err(DepsError::new(
+                DepsErrorKind::Network,
+                format!("unscripted download: {url}"),
+            ));
+        };
+        let open = script.opens.get() + 1;
+        script.opens.set(open);
+        if script.no_resume {
+            let pos = if range_from > 0 && !script.data.is_empty() {
+                // 200 意味着服务器忽略了 Range：从头给全量（调用方必须重下）。
+                0
+            } else {
+                0
+            };
+            return Ok(HttpStream {
+                reader: Box::new(std::io::Cursor::new(script.data[pos..].to_vec())),
+                total: Some(script.data.len() as u64),
+                resumed: false,
+            });
+        }
+        let fail_after = if open == 1 { script.fail_first_after } else { None };
+        let remaining: Vec<u8> = if range_from as usize >= script.data.len() {
+            Vec::new()
+        } else {
+            script.data[range_from as usize..].to_vec()
+        };
+        Ok(HttpStream {
+            reader: Box::new(ScriptedReader { data: remaining, pos: 0, fail_after }),
+            total: Some(script.data.len() as u64),
+            resumed: true,
+        })
+    }
+
+    fn append_file(&self, path: &Path, bytes: &[u8]) -> Result<(), DepsError> {
+        self.calls.borrow_mut().push(Call::AppendFile {
+            path: path.to_path_buf(),
+            len: bytes.len(),
+        });
+        self.files.borrow_mut().entry(path.to_path_buf()).and_modify(|v| v.extend_from_slice(bytes)).or_insert_with(|| bytes.to_vec());
+        Ok(())
+    }
+
+    fn file_size(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        self.calls.borrow_mut().push(Call::FileSize(path.to_path_buf()));
+        Ok(self.files.borrow().get(path).map(|v| v.len() as u64))
+    }
+
+    fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
+        self.calls.borrow_mut().push(Call::HashFile(path.to_path_buf()));
+        let bytes = self.files.borrow().get(path).cloned().ok_or_else(|| {
+            DepsError::new(DepsErrorKind::FileRead, format!("no such file: {}", path.display()))
+        })?;
+        use sha2::Digest;
+        let mut h = sha2::Sha256::new();
+        h.update(&bytes);
+        Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
     }
 
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {

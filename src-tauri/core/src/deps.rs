@@ -28,6 +28,12 @@ pub trait Deps {
     /// installed build permanently "unknown".
     fn spawn(&self, program: &str, args: &[&str]) -> Result<Vec<u8>, DepsError>;
 
+    /// Like [`Deps::spawn`], but stdout and stderr come back **separate**.
+    /// `llama-bench -o json` writes results to stdout and progress logs to
+    /// stderr; merging them (as [`Deps::spawn`] must for `--version`) would
+    /// corrupt the JSON.
+    fn spawn_split(&self, program: &str, args: &[&str]) -> Result<(Vec<u8>, Vec<u8>), DepsError>;
+
     /// Read a DWORD from the Windows registry. `None` when the key or value is
     /// absent — the caller decides whether to fall back to `nssm get`.
     fn reg_read_dword(&self, hive: RegHive, path: &str, value: &str) -> Result<Option<u32>, DepsError>;
@@ -48,6 +54,32 @@ pub trait Deps {
     /// `upd.downloading` copy ("{n}（{p}%）"). `None` when the server omitted
     /// the header — callers must degrade gracefully.
     fn http_get(&self, url: &str) -> Result<HttpBody, DepsError>;
+
+    /// A JSON request with an arbitrary method (`GET`/`PUT`/…), for the market
+    /// hub APIs — ModelScope's search is a `PUT` with a JSON body, which
+    /// [`Deps::http_get`] cannot express. Buffered: only for small responses,
+    /// never for model weights.
+    fn http_request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Vec<u8>, DepsError>;
+
+    /// Open a download stream, requesting bytes from `range_from` on.
+    ///
+    /// The returned `resumed` flag tells a `206 Partial Content` from a plain
+    /// `200`: callers must treat a `200` as "server ignored the range" and
+    /// restart from zero. `total` is the FULL file length whenever the server
+    /// declares it (Content-Length for 200, Content-Range total for 206).
+    /// Streaming by design — model weights are tens of GB and must never be
+    /// buffered (ADR-0004).
+    fn http_open_range(&self, url: &str, range_from: u64) -> Result<HttpStream, DepsError>;
+
+    /// Append bytes to a file, creating it if absent. The `.part` write path
+    /// of the downloader — `write_file` would mean buffering a whole model.
+    fn append_file(&self, path: &Path, bytes: &[u8]) -> Result<(), DepsError>;
+
+    /// File length in bytes, `None` when absent.
+    fn file_size(&self, path: &Path) -> Result<Option<u64>, DepsError>;
+
+    /// SHA-256 of a file, lowercase hex, read streaming (models are huge).
+    fn hash_file(&self, path: &Path) -> Result<String, DepsError>;
 
     /// `true` when the service answered `/healthz`.
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError>;
@@ -87,6 +119,15 @@ pub struct HttpBody {
     /// `Content-Length` as declared. `None` when absent — progress then has no
     /// denominator and callers report bytes instead of a percentage.
     pub content_length: Option<u64>,
+}
+
+/// A streaming HTTP response opened for download.
+pub struct HttpStream {
+    pub reader: Box<dyn std::io::Read>,
+    /// Full file length as declared by the server, if any.
+    pub total: Option<u64>,
+    /// `true` when the server answered the `Range` with `206 Partial Content`.
+    pub resumed: bool,
 }
 
 impl HttpBody {
@@ -145,6 +186,9 @@ pub enum AppErrorKind {
     Refused,
     /// Something in the update transaction failed; state was rolled back.
     UpdateFailed,
+    /// A market (model marketplace) operation failed: hub API error, bad
+    /// response, download refusal. `message` is fit for direct display.
+    MarketFailed,
     /// Preference or preset storage is unwritable (read-only dir, …).
     StorageFailed,
 }

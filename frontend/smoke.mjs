@@ -38,6 +38,9 @@ import { build } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { JSDOM, VirtualConsole } from 'jsdom'
 
+// 版本号单源：与 AboutView 一样直接读 frontend/package.json。
+const PKG = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'))
+
 // ---- bundle the app the way `npm run build` does ----------------------------
 
 await build({
@@ -252,20 +255,20 @@ assert.equal(txt(q('.rail-title')), COPY.appName[0], '侧栏标题就是软件�
 
 // The five destinations, in the order the rail draws them.
 const navs = qa('.rail .nav[data-view]')
-assert.equal(navs.length, 5, '侧栏有 5 个目的地')
+assert.equal(navs.length, 6, '侧栏有 6 个目的地')
 assert.deepEqual(
   navs.map((n) => n.getAttribute('data-view')),
-  ['presets', 'params', 'logs', 'settings', 'about'],
-  '导航顺序：预设 / 参数 / 日志 / 设置 / 关于',
+  ['presets', 'params', 'logs', 'market', 'settings', 'about'],
+  '导航顺序：预设 / 参数 / 日志 / 市场 / 设置 / 关于（市场在底部辅助区）',
 )
 const navLabels = navs.map((n) => txt(n.querySelector('.label')))
 assert.deepEqual(
   navLabels,
-  [COPY.presets[0], COPY.params[0], COPY.logs[0], COPY.settings[0], COPY.about[0]],
+  [COPY.presets[0], COPY.params[0], COPY.logs[0], COPY.market[0], COPY.settings[0], COPY.about[0]],
   '每个导航项的 .label 来自文案表',
 )
 assert.equal(qa('.rail .nav .count').length, 0, '导航没有计数徽标（v6 减法）')
-assert.equal(qa('.rail-foot .nav').length, 2, '.rail-foot 装设置与关于')
+assert.equal(qa('.rail-foot .nav').length, 3, '.rail-foot 装市场、设置与关于')
 assert.equal(q('.nav[data-view="params"]').getAttribute('aria-current'), 'true', '启动落在参数页')
 for (const view of ['presets', 'logs', 'settings', 'about']) {
   assert.equal(q(`.nav[data-view="${view}"]`).getAttribute('aria-current'), 'false', `${view} 未选中`)
@@ -290,7 +293,11 @@ assert.ok(q('.topbar .actions .round'), '主操作是圆形按钮')
 assert.equal(q('.topbar .actions .round').getAttribute('aria-label'), COPY.stopSvc[0], 'RUNNING 时主操作是「停止服务」')
 assert.ok(q('.actions .ghost[title="' + COPY.restartSvc[0] + '"]'), '有重启按钮')
 assert.ok(q('.actions .ghost[title="' + COPY.openDir[0] + '"]'), '有打开安装目录按钮')
-assert.equal(q('.actions .ghost[title="' + COPY.openDir[0] + '"]').disabled, true, '打开目录尚未接线，如实禁用')
+assert.equal(q('.actions .ghost[title="' + COPY.openDir[0] + '"]').disabled, false, '打开安装目录已接线：有 app_dir 即启用（此前始终禁用）')
+await click(q('.actions .ghost[title="' + COPY.openDir[0] + '"]'), '打开安装目录') // 不抛错即通过：Tauri 走 opener，浏览器 demo 落日志
+const openerCall = ipcDouble.calls.find((c) => c.cmd === 'plugin:opener|open_path')
+assert.ok(openerCall, '打开安装目录走 opener 插件（此前从未接线）')
+assert.equal(openerCall.args.path, 'F:\\llama.cpp', '打开的是 Snapshot 的安装目录')
 assert.equal(q('.actions .ghost[data-menu="more"]'), null, '没有「更多」菜单按钮（入口各自归位，v6 减法）')
 assert.equal(qa('.actions .wc button').length, 3, '自绘标题栏三个窗口按钮')
 assert.deepEqual(
@@ -607,7 +614,10 @@ assert.equal(qa('.content .row.hidden').length, 0, '回到全部时没有隐藏�
 // ---- 还原 asks Rust and clears the buffer ----------------------------------
 
 const sentRevert = calls().length
-await click(q('.actionbar .textbtn'), '还原')
+await click(
+  qa('.actionbar .textbtn').find((b) => txt(b) === COPY.revert[0]),
+  '还原',
+)
 const revertCall = calls()
   .slice(sentRevert)
   .find((c) => c.cmd === 'revert')
@@ -724,6 +734,32 @@ const loadCall = calls()
 assert.ok(loadCall, '载入走 load_preset')
 assert.deepEqual(Object.keys(loadCall.args), ['name'], 'load_preset 只带 name')
 assert.equal(loadCall.args.name, '7B 快速')
+// 预设值必须真实填进表单并存活（曾被收尾 refresh 用服务值冲掉 =「预设是摆设」）
+await flush()
+assert.equal(store.values.value.port, '8081', '载入后表单持有预设的 port')
+assert.equal(store.values.value.ngl, '7', '载入后表单持有预设的 ngl')
+assert.match(txt(qa('.content .lrow')[1]), new RegExp(COPY.loaded[0]), '已载入标记仍在')
+// 差异对 service_values 算：不再出现「0 项未应用却一直显示」
+assert.equal(store.snapshot.snap.facts.dirty, true, 'Rust 判定表单与服务不同')
+// 应用对话框有真实差异行；应用后动作条消失（完整闭环）
+await click(
+  qa('.actionbar .bar-btns button').find((b) => txt(b) === COPY.apply[0]),
+  '应用更改',
+)
+assert.equal(modalHead(), COPY.apply[0], '载入预设后能打开应用对话框')
+assert.ok(qa('.modal .diffrow').length > 0, '应用对话框显示与服务的真实差异')
+await click(modalButtons().find((b) => txt(b) === COPY.apply[0]), '确认应用')
+await flush()
+assert.equal(store.snapshot.form, null, '应用后清空缓冲')
+assert.equal(
+  q('.actionbar').classList.contains('show'),
+  false,
+  '应用后动作条消失（「0 项未应用却常驻」回归）',
+)
+// 复原快照基线，别让 8081 泄进后面的切换/保存断言
+store.setSnapshot(S.demoSnapshot())
+store.clearForm()
+await flush()
 
 // 删除 asks first, and cancelling writes nothing.
 const sentDel = calls().length
@@ -769,7 +805,7 @@ assert.match(txt(q('.content .about-hero .aname')), re(COPY.appName[0]), '关于
 assert.match(txt(q('.content .about-hero .atag')), re(COPY.appTagline[0]), '标语在名称下方')
 const aboutRows = qa('.content .lrow')
 assert.equal(aboutRows.length, 3, '三行版本信息：应用版本 / llama.cpp 构建 / 安装目录')
-assert.equal(txt(aboutRows[0].querySelector('.r .mono')), '0.1.0', '应用版本来自包版本')
+assert.equal(txt(aboutRows[0].querySelector('.r .mono')), PKG.version, '应用版本来自包版本')
 assert.equal(txt(aboutRows[1].querySelector('.r .mono')), 'b5527', '没有检查结果时构建号退回探活明细')
 assert.equal(txt(aboutRows[2].querySelector('.r .mono')), 'F:\\llama.cpp', '安装目录来自 facts.app_dir')
 const aboutChips = qa('.content .chip')
@@ -813,10 +849,10 @@ console.log('ok  关于页：hero / 版本行带复制 / 技术栈 / 四个快�
 await navTo('settings')
 assert.deepEqual(
   qa('.content .section').map(txt),
-  [COPY.ui[0], COPY.font[0], COPY.updates[0]],
-  '设置页三个 .section：界面 / 字体 / 更新（关于已独立成页）',
+  [COPY.ui[0], COPY.font[0], COPY.updates[0], COPY.marketSec[0]],
+  '设置页四个 .section：界面 / 字体 / 更新 / 模型市场（关于已独立成页）',
 )
-assert.equal(qa('.content .lrow').length, 8, '八行：语言 / 外观 / 动效 / 半透明材质 / 缩放 / 界面字体 / 等宽字体 / 启动时检查')
+assert.equal(qa('.content .lrow').length, 11, '十一行：语言 / 外观 / 动效 / 半透明材质 / 缩放 / 界面字体 / 等宽字体 / 启动时检查 / 下载根目录 / HF令牌 / 魔搭令牌')
 let settingDds = qa('.content .val.sel .selbtn')
 assert.equal(settingDds.length, 4, '四个 .val.sel 下拉：语言 / 外观 / 界面字体 / 等宽字体')
 const langOptEls = await openDd(settingDds[0], '语言下拉')
@@ -873,7 +909,7 @@ assert.equal(langCall.args.settings.language, 'en', '带上新语言')
 assert.equal(store.settings.value.language, 'en', 'store 持有 Rust 回读的值')
 assert.deepEqual(
   qa('.content .section').map(txt),
-  [COPY.ui[1], COPY.font[1], COPY.updates[1]],
+  [COPY.ui[1], COPY.font[1], COPY.updates[1], COPY.marketSec[1]],
   '整页换成英文',
 )
 assert.deepEqual(
@@ -883,7 +919,7 @@ assert.deepEqual(
 )
 pushSnap({ lang: 'zh', settings: { ...store.snapshot.snap.settings, language: 'zh' } })
 await flush()
-assert.deepEqual(qa('.content .section').map(txt), [COPY.ui[0], COPY.font[0], COPY.updates[0]], '切回中文')
+assert.deepEqual(qa('.content .section').map(txt), [COPY.ui[0], COPY.font[0], COPY.updates[0], COPY.marketSec[0]], '切回中文')
 
 // An appearance change moves the shell's own `data-theme`.
 settingDds = qa('.content .val.sel .selbtn')
@@ -1018,10 +1054,10 @@ const switchCall = calls()
   .slice(sentSwitch)
   .find((c) => c.cmd === 'switch_service')
 assert.ok(switchCall, '没有未应用更改时直接切换')
-assert.deepEqual(Object.keys(switchCall.args).sort(), ['backup', 'service', 'values'], 'switch_service 带 service/values/backup')
-assert.equal(switchCall.args.service, 'QwenVL')
-assert.equal(switchCall.args.backup, false, '没有改动就不备份')
-assert.equal(switchCall.args.values.port, '8080', '切换时带上当前表单')
+assert.deepEqual(Object.keys(switchCall.args), ['args'], 'switch_service 参数包在 args 键里（Rust 签名 args: SwitchArgs）')
+assert.equal(switchCall.args.args.service, 'QwenVL')
+assert.equal(switchCall.args.args.backup, false, '没有改动就不备份')
+assert.equal(switchCall.args.args.values.port, '8080', '切换时带上当前表单')
 assert.equal(q('.menu'), null, '点过菜单项后菜单收起')
 
 // ---- switching with unapplied changes asks, with three answers -------------
@@ -1052,7 +1088,7 @@ const sentDiscard = calls().length
 await click(modalButtons()[0], '放弃更改')
 const discardSwitch = sentOf(sentDiscard, 'switch_service')[0]
 assert.ok(discardSwitch, '放弃更改后照常切换')
-assert.equal(discardSwitch.args.service, 'QwenVL')
+assert.equal(discardSwitch.args.args.service, 'QwenVL')
 assert.equal(sentOf(sentDiscard, 'save_preset').length, 0, '放弃更改不备份')
 
 // 另存并切换: store the form under a timestamped name first.
@@ -1064,9 +1100,9 @@ const sentBackup = calls().length
 await click(modalButtons()[1], '另存并切换')
 const backupSave = sentOf(sentBackup, 'save_preset')[0]
 assert.ok(backupSave, '另存并切换先存一份')
-assert.deepEqual(Object.keys(backupSave.args).sort(), ['name', 'values'], 'save_preset 带 name/values')
-assert.match(backupSave.args.name, /^自动备份 \d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, '备份名带时间戳')
-assert.equal(backupSave.args.values.port, '9998', '存的是当前表单')
+assert.deepEqual(Object.keys(backupSave.args), ['args'], 'save_preset 参数包在 args 键里（Rust 签名 args: PresetArgs）')
+assert.match(backupSave.args.args.name, /^自动备份 \d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, '备份名带时间戳')
+assert.equal(backupSave.args.args.values.port, '9998', '存的是当前表单')
 assert.equal(sentOf(sentBackup, 'switch_service').length, 1, '存完再切换')
 
 // The same guard covers loading a preset.
@@ -1087,8 +1123,8 @@ console.log('ok  切换服务 / 载入预设前先三选确认（放弃 / 另存
 
 // ---- the preset is saved from the presets page, not only from a dialog -----
 
-await navTo('presets')
-await click(q('.content .section.preset-head .textbtn'), '保存为预设')
+await navTo('params')
+await click(q('.rail-tools .savepreset'), '保存为预设')
 assert.equal(modalHead(), COPY.savePreset[0], '保存预设弹层')
 const nameInput = q('.scrim .modal input.nameinput')
 assert.ok(nameInput, '预设名是 .nameinput 输入框')
@@ -1099,10 +1135,10 @@ const sentSave = calls().length
 await click(confirmBtn(), '保存预设')
 const saveCall = sentOf(sentSave, 'save_preset')[0]
 assert.ok(saveCall, '保存走 save_preset')
-assert.deepEqual(Object.keys(saveCall.args).sort(), ['name', 'values'])
-assert.equal(saveCall.args.name, '32B 长上下文', '名字就是输入框里的')
+assert.deepEqual(Object.keys(saveCall.args), ['args'])
+assert.equal(saveCall.args.args.name, '32B 长上下文', '名字就是输入框里的')
 assert.deepEqual(
-  { ...saveCall.args.values },
+  { ...saveCall.args.args.values },
   { ...store.snapshot.snap.values },
   '存的是表单里的全部字段',
 )
@@ -1165,10 +1201,10 @@ const sentApply2 = calls().length
 await click(confirmBtn(), '确认应用')
 const applyCall = sentOf(sentApply2, 'apply_changes')[0]
 assert.ok(applyCall, '确认后走 apply_changes')
-assert.deepEqual(Object.keys(applyCall.args).sort(), ['extras', 'values'], 'apply_changes 带 values + extras')
-assert.equal(applyCall.args.values.ngl, '7')
-assert.equal(applyCall.args.values.port, '9999')
-assert.deepEqual([...applyCall.args.extras], [], 'extras 来自 Snapshot')
+assert.deepEqual(Object.keys(applyCall.args), ['args'], 'apply_changes 参数包在 args 键里')
+assert.equal(applyCall.args.args.values.ngl, '7')
+assert.equal(applyCall.args.args.values.port, '9999')
+assert.deepEqual([...applyCall.args.args.extras], [], 'extras 来自 Snapshot')
 assert.equal(store.snapshot.snap.values.ngl, '7', '界面上的值来自 Rust 返回的 Snapshot')
 assert.equal(store.snapshot.snap.values.port, '9999')
 assert.equal(store.snapshot.form, null, 'apply 之后表单被清空')
@@ -1363,15 +1399,26 @@ console.log('ok  更新状态四态分明：未检查 / 未知 / 已知 / 已是
 
 const SHAPES = {
   get_snapshot: ['values'],
-  switch_service: ['service', 'values', 'backup'],
-  apply_changes: ['values', 'extras'],
+  switch_service: ['args'],
+  apply_changes: ['args'],
   service_action: ['action'],
   restart: ['values'],
   set_start_mode: ['mode'],
   load_preset: ['name'],
-  save_preset: ['name', 'values'],
+  save_preset: ['args'],
   delete_preset: ['name'],
   save_settings: ['settings'],
+  market_hot: ['hub', 'limit'],
+  market_search: ['args'],
+  market_repo: ['hub', 'id'],
+  market_tasks: [],
+  market_enqueue: ['args'],
+  market_pause: ['id'],
+  market_resume: ['id'],
+  market_cancel: ['id'],
+  bench_run: ['args'],
+  local_scan: ['root'],
+  local_delete: ['args'],
 }
 const marked = calls().length
 ipcModule.getSnapshot({ alias: 'qwen3-32b' })
@@ -1384,8 +1431,19 @@ ipcModule.loadPreset('7B 快速')
 ipcModule.savePreset('7B 快速', { port: '8080' })
 ipcModule.deletePreset('7B 快速')
 ipcModule.saveSettings({ language: 'zh' })
+ipcModule.marketHot('ms', 50)
+ipcModule.marketSearch('ms', 'qwen', 50)
+ipcModule.marketRepo('ms', 'Qwen/Qwen3-0.6B-GGUF')
+ipcModule.marketTasks()
+ipcModule.marketEnqueue({ hub: 'ms', repo: 'Qwen/Qwen3-0.6B-GGUF', label: 'Q8_0', root: 'F:\AI_Model', files: [{ path: 'f.gguf', size: 1, sha256: null }] })
+ipcModule.marketPause('x')
+ipcModule.marketResume('x')
+ipcModule.marketCancel('x')
+ipcModule.benchRun('F:\m.gguf')
+ipcModule.localScan('F:\AI_Model')
+ipcModule.localDelete({ path: 'F:/m.gguf' }, null)
 const shaped = since(marked)
-assert.equal(shaped.length, 10, '十个命令各发一条')
+assert.equal(shaped.length, 21, '二十一个命令各发一条')
 for (const [cmd, keys] of Object.entries(SHAPES)) {
   const entry = shaped.find((c) => c.cmd === cmd)
   assert.ok(entry, `${cmd} 发出`)
@@ -1401,8 +1459,12 @@ assert.deepEqual(
   'get_snapshot 带的是表单（可为 null）',
 )
 assert.equal(shaped.find((c) => c.cmd === 'service_action').args.action, 'stop', 'action 是字符串')
+assert.deepEqual(
+  { ...shaped.find((c) => c.cmd === 'apply_changes').args.args },
+  { values: { port: '8080' }, extras: [] },
+  'apply_changes 的参数包在 args 键里（Rust 签名 args: ApplyArgs）',
+)
 assert.equal(shaped.find((c) => c.cmd === 'set_start_mode').args.mode, 'auto', 'mode 是字符串')
-assert.deepEqual([...shaped.find((c) => c.cmd === 'apply_changes').args.extras], [], 'extras 是数组')
 const bootCheck = calls().find((c) => c.cmd === 'check_update')
 assert.deepEqual(Object.keys(bootCheck.args), [], 'check_update 不带参数')
 assert.deepEqual(Object.keys(installCall.args), [], 'install_update 不带参数')
@@ -1411,6 +1473,7 @@ const CONTRACT = new Set([
   'plugin:event|unlisten',
   'plugin:window|set_theme',
   'plugin:window|set_effects',
+  'plugin:opener|open_path',
   'revert',
   'check_update',
   'install_update',
@@ -1516,6 +1579,61 @@ if (updaterSrc) {
   assert.ok(rustIds.length > 0, '读到了 Rust 的渠道 id')
   assert.deepEqual(shownChannels.map((c) => c.value), rustIds, '渠道 id 与 updater.rs 逐一对应')
   console.log(`ok  构建线 ${rustIds.length} 条与 updater.rs 一致`)
+
+// ---- 市场：启用回填 model 并走 Apply（「点击启用无效」的回归锁定） ----
+
+{
+  const model = S.demoMarket.local.models[0]
+  const mark = calls().length
+  await S.market.enable(model)
+  const mkt = since(mark)
+  const apply = mkt.find((c) => c.cmd === 'apply_changes')
+  assert.ok(apply, '启用必须发出 apply_changes')
+  assert.equal(
+    apply.args.args.values.model,
+    model.path,
+    '启用把本地模型路径回填进表单的 model 字段（args 键内）',
+  )
+  if (model.mmproj) {
+    assert.equal(apply.args.args.values.mmproj, model.mmproj, 'mmproj 一并回填')
+  }
+  assert.equal(
+    S.store.values.value.model,
+    model.path,
+    'Rust 回读的 Snapshot 已生效（store 持有新值）',
+  )
+  console.log('ok  市场「启用」：回填 model/mmproj 并走 Apply，回读生效')
+}
+
+// ---- 参数页动作条：保存为预设（用户指出参数页缺这个入口） ----
+
+{
+  store.editField('port', '65535')
+  await flush()
+  const barBtns = qa('.actionbar .bar-btns button').map(txt)
+  assert.ok(!barBtns.includes(COPY.savePreset[0]), '动作条只留还原/应用（保存预设是表单操作，不在脏状态条里）')
+  const toolsBtns = qa('.rail-tools button').map(txt)
+  assert.ok(toolsBtns.includes(COPY.savePreset[0]), '参数页工具区常驻「保存为预设」')
+  const markSave = calls().length
+  await click(
+    qa('.rail-tools button').find((b) => txt(b) === COPY.savePreset[0]),
+    '保存为预设',
+  )
+  const input = q('.modal .nameinput')
+  assert.ok(input, '弹出的保存对话框有名字输入框')
+  await typeInto(input, '动作条存的预设')
+  await click(modalButtons().find((b) => txt(b) === COPY.savePreset[0]), '确认保存')
+  const saveCall = calls()
+    .slice(markSave)
+    .find((c) => c.cmd === 'save_preset')
+  assert.ok(saveCall, '动作条保存走 save_preset')
+  assert.equal(saveCall.args.args.name, '动作条存的预设')
+  assert.equal(saveCall.args.args.values.port, '65535', '存的是当前表单')
+  console.log('ok  参数页工具区「保存为预设」：整张表单入预设，动作条不再混杂')
+  // 复原：清掉本块的编辑，别污染后续测试的表单状态
+  store.clearForm()
+  await flush()
+}
 } else {
   console.log('ok  (src-tauri 不在，跳过渠道与 Rust 的交叉核对)')
 }
@@ -1564,6 +1682,15 @@ const REQUIRED = [
   // 设置
   'ui', 'lang', 'appearance', 'motion', 'mica', 'micaHint', 'checkOnStart',
   'system', 'light', 'dark', 'fontDefault', 'uiScale', 'uiFont', 'monoFont',
+  // 市场
+  'market', 'marketHub', 'searchPh', 'hot', 'localSec', 'tasksSec', 'download',
+  'pause', 'resume', 'cancelDl', 'removeModel', 'benchBtn', 'benchRunning',
+  'enable', 'openFolder', 'fitFull', 'fitPartial', 'fitCpu', 'fitNo', 'gated',
+  'back', 'allSizes', 'scaleLabel', 'hwGpu', 'hwRam', 'downloads', 'ctx', 'arch', 'marketEmpty',
+  'localEmpty', 'confirmDel', 'confirmBench', 'dlRunning', 'dlQueued',
+  'marketSec', 'marketHfToken', 'marketMsToken', 'refresh', 'loadFail', 'mmprojHint', 'enableAsk',
+  'enableRestart', 'enableCurrent', 'copyDiag', 'copied',
+  'dlPaused', 'dlFin', 'dlFail', 'mmproj', 'shards', 'enableDone',
   // 关于
   'appTagline', 'appVersion', 'llamaBuild', 'appDir', 'stackSec', 'quickSec',
   'checkUpdates', 'homepage', 'devBy', 'copyBtn', 'copied', 'version',

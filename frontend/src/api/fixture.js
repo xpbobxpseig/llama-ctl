@@ -189,3 +189,82 @@ export function demoUpdateCheck(overrides = {}) {
     ...overrides,
   }
 }
+
+
+// ---- market（模型市场 demo 数据，spec: docs/spec/model-marketplace.md）----
+
+export const demoMarket = {
+  list: [
+    {
+      hub: 'ms', id: 'Qwen/Qwen3-0.6B-GGUF', name: 'Qwen3-0.6B-GGUF', downloads: 120000,
+      likes: 88, license: 'Apache-2.0', task: 'text-generation', params_b: 0.6,
+      size_hint: 639446688, gated: false,
+    },
+    {
+      hub: 'ms', id: 'unsloth/Qwen3.8-27B-GGUF', name: 'Qwen3.8-27B-GGUF', downloads: 430000,
+      likes: 150, license: 'apache-2.0', task: 'text-generation', params_b: 27,
+      size_hint: 62000000000, gated: false,
+    },
+    {
+      hub: 'ms', id: 'unsloth/Qwen3-30B-A3B-Instruct-GGUF', name: 'Qwen3-30B-A3B-Instruct-GGUF', downloads: 96000,
+      likes: 77, license: 'apache-2.0', task: 'text-generation', params_b: 30,
+      size_hint: 31000000000, gated: false,
+    },
+    {
+      hub: 'ms', id: 'meta-llama/Llama-3.3-70B-Instruct-GGUF', name: 'Llama-3.3-70B-Instruct-GGUF', downloads: 185000,
+      likes: 210, license: 'llama-3.3', task: 'text-generation', params_b: 70,
+      size_hint: 42000000000, gated: true,
+    },
+  ],
+  detail: {
+    hub: 'ms', id: 'unsloth/Qwen3.8-27B-GGUF', downloads: 430000, gated: false,
+    gguf: { architecture: 'qwen3', context_length: 40960, total_params: 26955292672 },
+    variants: [
+      {
+        label: 'UD-IQ1_S', is_sharded: false, total_size: 6192222208,
+        files: [{ path: 'Qwen3.8-27B-UD-IQ1_S.gguf', size: 6192222208, sha256: 'aa11' }],
+        mmproj: { path: 'mmproj-Qwen3.8-27B-f16.gguf', size: 931145952, sha256: 'dd44' },
+        fit: { tier: 'full_gpu', reason: '权重 6.2GB（含 1.5GB 余量）≈ 显存 24.0GB 的 32%，可全量 offload', offload_ratio: 100 },
+      },
+      {
+        label: 'Q4_K_M', is_sharded: true, total_size: 27000000000,
+        files: [
+          { path: 'Qwen3.8-27B-Q4_K_M-00001-of-00002.gguf', size: 15000000000, sha256: 'bb22' },
+          { path: 'Qwen3.8-27B-Q4_K_M-00002-of-00002.gguf', size: 12000000000, sha256: 'cc33' },
+        ],
+        mmproj: { path: 'mmproj-Qwen3.8-27B-f16.gguf', size: 931145952, sha256: 'dd44' },
+        fit: { tier: 'partial_gpu', reason: '权重 27.0GB 超出显存 24.0GB，约 88% 可进显存，其余走内存（速度受 CPU/带宽限制）', offload_ratio: 88 },
+      },
+    ],
+  },
+  tasks: [
+    {
+      id: 'ms:Qwen/Qwen3-0.6B-GGUF:Q8_0', hub: 'ms', repo: 'Qwen/Qwen3-0.6B-GGUF', label: 'Q8_0',
+      files: [], state: 'done', received: 639446688, total: 639446688, speed_bps: 0,
+      error: null, added_at_ms: 1,
+    },
+  ],
+  local: {
+    hardware: {
+      gpus: [{ name: 'NVIDIA GeForce RTX 4090', vendor: 'nvidia', vram_bytes: 25769803776 }],
+      ram_total: 68719476736,
+      cpu_name: 'AMD Ryzen 9 9950X',
+    },
+    models: [
+      {
+        path: 'F:/AI_Model/Qwen3.8/Qwen3.8-27B-CRACK-IQ4_XS.gguf', size: 15546361472,
+        label: 'CRACK-IQ4_XS', is_sharded: false,
+        mmproj: 'F:/AI_Model/Qwen3.8/mmproj-Qwen3.8-27B-f16.gguf',
+        fit: { tier: 'full_gpu', reason: '权重 15.5GB（含 1.5GB 余量）≈ 显存 24.0GB 的 66%，可全量 offload', offload_ratio: 100 },
+      },
+      {
+        path: 'F:/AI_Model/Qwen3.8-27B-Abliterated-Q4_K_M.gguf', size: 16810714496,
+        label: 'Q4_K_M', is_sharded: false, mmproj: null,
+        fit: { tier: 'full_gpu', reason: '权重 16.8GB（含 1.5GB 余量）≈ 显存 24.0GB 的 72%，可全量 offload', offload_ratio: 100 },
+      },
+    ],
+    benchmarks: [
+      { model_path: 'F:/AI_Model/Qwen3.8/Qwen3.8-27B-CRACK-IQ4_XS.gguf', pp_tps: 2234.87, tg_tps: 43.53, ngl: 99, benched_at_ms: 1 },
+    ],
+  },
+}

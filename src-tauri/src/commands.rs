@@ -24,11 +24,14 @@
 //! long install merely makes *its own* result late, which is survivable.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use llama_ctl_commands::ipc::{self, ErrorPayload, OkPayload};
 use llama_ctl_commands::snapshot as cmd;
 use llama_ctl_core::deps::{AppError, AppErrorKind};
+use llama_ctl_core::deps::Deps as _;
+use llama_ctl_core::market::{self, DownloadManager, DownloadTask, HubKind, TaskFile};
 use llama_ctl_core::persist::Settings;
 use llama_ctl_core::real::RealDeps;
 use llama_ctl_core::service::StartMode;
@@ -106,6 +109,64 @@ pub struct PresetArgs {
 /// renders lines as they arrive.
 pub const EVENT_RESTART: &str = "llama-ctl://restart-progress";
 pub const EVENT_UPDATE: &str = "llama-ctl://update-progress";
+/// 模型市场下载进度：payload 是**全量**任务列表（前端零 diff 逻辑）。
+pub const EVENT_MARKET: &str = "llama-ctl://download-progress";
+/// 实测进度：行流（停服/恢复/llama-bench 日志）。
+pub const EVENT_BENCH: &str = "llama-ctl://bench-progress";
+
+/// 下载管理器：独立于 `AppState` 的锁（ADR-0004 红线）。
+pub struct MarketHandle(pub Arc<DownloadManager>);
+
+fn hub_kind(s: &str) -> HubKind {
+    match s {
+        "hf" => HubKind::Hf,
+        _ => HubKind::Ms,
+    }
+}
+
+fn default_limit() -> u32 {
+    50
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BenchArgs {
+    pub model_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LocalDeleteArgs {
+    pub model: llama_ctl_core::market::LocalModel,
+    /// 当前服务的 --model 值（删除守卫）。
+    #[serde(default)]
+    pub current_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MarketListArgs {
+    pub hub: String,
+    #[serde(default)]
+    pub query: String,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EnqueueFile {
+    pub path: String,
+    pub size: u64,
+    #[serde(default)]
+    pub sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EnqueueArgs {
+    pub hub: String,
+    pub repo: String,
+    pub label: String,
+    /// 下载根目录（settings 里的 market.download_root）。
+    pub root: String,
+    pub files: Vec<EnqueueFile>,
+}
 
 fn emit(app: &AppHandle, event: &str, line: &str) {
     // A closed or unsubscribed window is not an error — the operation it was
@@ -286,6 +347,207 @@ pub async fn is_dirty(handle: AppHandle, values: FormValues) -> Result<OkPayload
     run_worker(handle, move |d, a| Ok(cmd::is_dirty(d, a, &values))).await
 }
 
+// ---- market（模型市场）----
+
+/// 市场命令不走 `AppState`：搜索/详情是纯读，下载走 DownloadManager 自己的
+/// 锁（ADR-0004）。`run_market` 只借 `DepsHandle` 与 `MarketHandle`。
+async fn run_market<T, F>(handle: AppHandle, f: F) -> Result<OkPayload, ErrorPayload>
+where
+    T: serde::Serialize + Send + 'static,
+    F: FnOnce(&RealDeps, &Arc<DownloadManager>) -> Result<T, AppError> + Send + 'static,
+{
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        let d = handle.state::<DepsHandle>();
+        let m = handle.state::<MarketHandle>();
+        f(d.deps(), &m.0)
+    })
+    .await
+    .unwrap_or_else(|e| Err(AppError::new(AppErrorKind::Refused, format!("worker failed: {e}"))));
+
+    ipc::envelope(out)
+}
+
+/// 热门榜：按下载量排序的 GGUF 仓库。
+#[tauri::command]
+pub async fn market_hot(
+    handle: AppHandle,
+    hub: String,
+    limit: Option<u32>,
+) -> Result<OkPayload, ErrorPayload> {
+    let kind = hub_kind(&hub);
+    let limit = limit.unwrap_or(50);
+    run_market(handle, move |d, _| market::hub(kind).hot(d, limit)).await
+}
+
+/// 关键词搜索（空查询退化为热门榜）。
+#[tauri::command]
+pub async fn market_search(
+    handle: AppHandle,
+    args: MarketListArgs,
+) -> Result<OkPayload, ErrorPayload> {
+    let kind = hub_kind(&args.hub);
+    let query = args.query.trim().to_string();
+    let limit = args.limit;
+    run_market(handle, move |d, _| {
+        if query.is_empty() {
+            market::hub(kind).hot(d, limit)
+        } else {
+            market::hub(kind).search(d, &query, limit)
+        }
+    })
+    .await
+}
+
+/// 仓库详情：量化档归组 + gguf 元数据 + gated 标注。
+#[tauri::command]
+pub async fn market_repo(
+    handle: AppHandle,
+    hub: String,
+    id: String,
+) -> Result<OkPayload, ErrorPayload> {
+    let kind = hub_kind(&hub);
+    run_market(handle, move |d, _| {
+        let mut repo = market::hub(kind).detail(d, &id)?;
+        let hw = market::detect(d);
+        for v in &mut repo.variants {
+            let sz = v.total_size + v.mmproj.as_ref().map(|m| m.size).unwrap_or(0);
+            v.fit = Some(market::assess(&hw, sz));
+        }
+        Ok(repo)
+    })
+    .await
+}
+
+/// 当前下载任务全量列表（市场页轮询兜底 + 事件之外的一致性来源）。
+#[tauri::command]
+pub async fn market_tasks(handle: AppHandle) -> Result<OkPayload, ErrorPayload> {
+    run_market(handle, move |_, m| Ok::<_, AppError>(m.tasks())).await
+}
+
+/// 入队一个量化档的下载（分片 + mmproj 由前端一次给全），随即起工作线程。
+#[tauri::command]
+pub async fn market_enqueue(
+    handle: AppHandle,
+    args: EnqueueArgs,
+) -> Result<OkPayload, ErrorPayload> {
+    let kind = hub_kind(&args.hub);
+    run_market(handle, move |d, m| {
+        let dir = market::display_name(&args.repo);
+        let files: Vec<TaskFile> = args
+            .files
+            .iter()
+            .map(|f| TaskFile {
+                url: market::hub(kind).download_url(&args.repo, &f.path),
+                dest: PathBuf::from(&args.root).join(dir).join(&f.path),
+                sha256: f.sha256.clone(),
+                size: f.size,
+            })
+            .collect();
+        let total = files.iter().map(|f| f.size).sum();
+        let task = DownloadTask {
+            id: format!("{}:{}:{}", args.hub, args.repo, args.label),
+            hub: kind,
+            repo: args.repo.clone(),
+            label: args.label.clone(),
+            received: 0,
+            speed_bps: 0,
+            state: market::TaskState::Queued,
+            error: None,
+            added_at_ms: d.now_millis(),
+            files,
+            total,
+        };
+        m.enqueue(d, task)?;
+        m.spawn_worker(*d);
+        Ok(m.tasks())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn market_pause(handle: AppHandle, id: String) -> Result<OkPayload, ErrorPayload> {
+    run_market(handle, move |_, m| {
+        m.pause(&id);
+        Ok::<_, AppError>(m.tasks())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn market_resume(handle: AppHandle, id: String) -> Result<OkPayload, ErrorPayload> {
+    run_market(handle, move |d, m| {
+        m.resume(*d, &id);
+        Ok::<_, AppError>(m.tasks())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn market_cancel(handle: AppHandle, id: String) -> Result<OkPayload, ErrorPayload> {
+    run_market(handle, move |d, m| {
+        m.cancel(d, &id);
+        Ok::<_, AppError>(m.tasks())
+    })
+    .await
+}
+
+/// 实测一个本地模型：停服→bench→恢复，行流走 [`EVENT_BENCH`]，
+/// 成绩写入 market.json（同模型覆盖）。
+#[tauri::command]
+pub async fn bench_run(handle: AppHandle, args: BenchArgs) -> Result<OkPayload, ErrorPayload> {
+    let h = handle.clone();
+    run_blocking(handle, EVENT_BENCH, move |d, a, sink| {
+        let out = cmd::bench_run(d, a, std::path::Path::new(&args.model_path), sink)?;
+        let m = h.state::<MarketHandle>();
+        m.0.add_benchmark(
+            d,
+            llama_ctl_core::market::BenchRecord {
+                model_path: args.model_path.clone(),
+                pp_tps: out.pp_tps,
+                tg_tps: out.tg_tps,
+                ngl: out.ngl,
+                benched_at_ms: d.now_millis(),
+            },
+        )?;
+        Ok(Some(out))
+    })
+    .await
+}
+
+/// 扫描本地模型 + 硬件检测结果 + 实测成绩，市场页「已下载区」一次拉全。
+#[tauri::command]
+pub async fn local_scan(handle: AppHandle, root: String) -> Result<OkPayload, ErrorPayload> {
+    run_market(handle, move |d, m| {
+        let hw = market::detect(d);
+        let models = market::local::scan(d, std::path::Path::new(&root), &hw)?;
+        #[derive(serde::Serialize)]
+        struct LocalScan {
+            hardware: market::Hardware,
+            models: Vec<market::LocalModel>,
+            benchmarks: Vec<llama_ctl_core::market::BenchRecord>,
+        }
+        Ok::<_, AppError>(LocalScan { models, hardware: hw, benchmarks: m.benchmarks() })
+    })
+    .await
+}
+
+/// 删除本地模型：当前服务正在用的拒绝；分片与 mmproj 一起删，实测成绩一并清。
+#[tauri::command]
+pub async fn local_delete(handle: AppHandle, args: LocalDeleteArgs) -> Result<OkPayload, ErrorPayload> {
+    run_market(handle, move |d, m| {
+        if market::local::is_current_model(args.current_model.as_deref(), &args.model.path) {
+            return Err(AppError::new(
+                AppErrorKind::MarketFailed,
+                "该模型正被当前服务使用：先在参数页换模型并 Apply，再删除",
+            ));
+        }
+        market::local::delete(d, &args.model)?;
+        m.remove_benchmark(d, &args.model.path.to_string_lossy());
+        Ok::<_, AppError>(m.tasks())
+    })
+    .await
+}
+
 // ---- the worker path -------------------------------------------------------
 
 /// Run one command's body on a blocking worker.
@@ -361,6 +623,17 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sy
         install_update,
         prune_update_dirs,
         is_dirty,
+        market_hot,
+        market_search,
+        market_repo,
+        market_tasks,
+        market_enqueue,
+        market_pause,
+        market_resume,
+        market_cancel,
+        bench_run,
+        local_scan,
+        local_delete,
     ]
 }
 

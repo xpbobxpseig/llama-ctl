@@ -36,6 +36,44 @@ function clearView() {
   clearedTail.value = JSON.stringify(fileLines.value)
 }
 
+/** 复制诊断：上下文（服务/模型/日志文件）+ 全部可见行，整段进剪贴板。
+ *  WebView2 的 clipboard API 不可用时退回 textarea+execCommand。 */
+const copied = ref(false)
+
+async function copyDiag() {
+  const NL = String.fromCharCode(10)
+  const header = [
+    `拉马管家 诊断信息 ${new Date().toLocaleString()}`,
+    `服务: ${store.selected.value || '—'}`,
+    `模型: ${store.values.value.model || '—'}`,
+    `日志文件: ${fileFrom.value || '—'}`,
+    '---',
+  ].join(NL)
+  const text = header + NL + raw.value.join(NL) + NL
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      throw new Error('no clipboard api')
+    }
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } catch {
+      // 尽力而为：剪贴板完全不可用时保持安静
+    }
+    ta.remove()
+  }
+  copied.value = true
+  setTimeout(() => (copied.value = false), 2000)
+}
+
 async function poll() {
   const mine = ++token
   try {
@@ -150,6 +188,9 @@ watch(
     <div class="logmeta">
       <span class="mono">{{ path }}</span>
       <span class="logops">
+        <button class="textbtn copydiag" type="button" @click="copyDiag">
+          {{ copied ? t('copied', lang) : t('copyDiag', lang) }}
+        </button>
         <button class="textbtn clear" type="button" :disabled="clearDisabled" @click="clearView">
           {{ t('clearLog', lang) }}
         </button>
@@ -158,7 +199,7 @@ watch(
         </button>
       </span>
     </div>
-    <div class="log">
+    <div class="log selectable">
       <div v-for="(line, i) in lines" :key="i" class="logline" :class="line.level">
         <span class="t">{{ line.time }}</span><span class="m">{{ line.body }}</span>
       </div>

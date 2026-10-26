@@ -17,13 +17,15 @@ import LogsView from './src/design/LogsView.vue'
 import PresetsView from './src/design/PresetsView.vue'
 import SettingsView from './src/design/SettingsView.vue'
 import AboutView from './src/design/AboutView.vue'
+import MarketView from './src/design/MarketView.vue'
+import * as market from './src/stores/market.js'
 import { C as COPY, t, autoBackupName } from './src/design/copy.js'
 import * as font from './src/design/font.js'
 import * as store from './src/stores/snapshot.js'
 import * as theme from './src/stores/theme.js'
 import * as update from './src/stores/update.js'
 import * as ipc from './src/api/ipc.js'
-import { demoSnapshot, demoUpdateCheck, emptySnapshot } from './src/api/fixture.js'
+import { demoSnapshot, demoUpdateCheck, emptySnapshot, demoMarket } from './src/api/fixture.js'
 import {
   FIELDS,
   GROUP_ORDER,
@@ -117,6 +119,27 @@ function handle(cmd, args) {
     case 'plugin:window|set_theme':
     case 'plugin:window|set_effects':
       return Promise.resolve(null)
+    // ---- market（模型市场）----
+    case 'market_search':
+    case 'market_hot':
+      return ok(demoMarket.list)
+    case 'market_repo':
+      return ok(demoMarket.detail)
+    case 'market_tasks':
+      return ok(demoMarket.tasks)
+    case 'market_enqueue':
+      return ok(demoMarket.tasks.map((t) => ({ ...t, state: 'running' })))
+    case 'market_resume':
+      return ok(demoMarket.tasks)
+    case 'market_pause':
+      return ok(demoMarket.tasks.map((t) => ({ ...t, state: 'paused' })))
+    case 'market_cancel':
+    case 'local_delete':
+      return ok([])
+    case 'bench_run':
+      return ok({ pp_tps: 2234.87, tg_tps: 43.53, ngl: 99 })
+    case 'local_scan':
+      return ok(demoMarket.local)
     case 'save_settings':
       // Rust re-reads and returns the whole Snapshot; a language change comes
       // back with the new string table. The fixture carries one table, so only
@@ -137,9 +160,22 @@ function handle(cmd, args) {
     case 'restart':
       return ok(snap())
     case 'switch_service':
-      return ok({ ...snap(), selected: args.service })
-    case 'load_preset':
-      return ok({ ...snap(), preset_loaded: args.name })
+      return ok({ ...snap(), selected: args.args.service })
+    case 'load_preset': {
+      // 真实语义：Snapshot.values = 预设值（editing=Some(preset)），
+      // service_values 仍是服务的当前参数——差异对它算。
+      // load_preset 的签名是扁平 name（Rust: name: String），别套 args。
+      const base = snap()
+      return ok({
+        ...base,
+        values: { ...base.values, port: '8081', ngl: '7' },
+        service_values: { ...base.values },
+        facts: { ...base.facts, dirty: true },
+        preset_loaded: args.name,
+      })
+    }
+    case 'save_preset':
+      return ok({ saved: true, name: args.args.name })
     case 'set_start_mode':
       return ok({ ...snap(), facts: { ...snap().facts, start: args.mode } })
     case 'apply_changes': {
@@ -150,7 +186,8 @@ function handle(cmd, args) {
       return ok({
         snapshot: {
           ...now,
-          values: { ...now.values, ...args.values },
+          values: { ...now.values, ...args.args.values },
+          service_values: { ...(now.service_values ?? now.values), ...args.args.values },
           facts: { ...now.facts, dirty: false },
         },
       })
@@ -233,10 +270,13 @@ window.__SMOKE__ = {
   // The design layer, as mounted.
   DesignApp,
   ParamsView,
+  market,
   LogsView,
   PresetsView,
   SettingsView,
   AboutView,
+  MarketView,
+  demoMarket,
   copy: { C: COPY, t, autoBackupName },
   font,
   // Field metadata the parameter form is built from.

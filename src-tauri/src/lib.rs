@@ -12,11 +12,14 @@
 
 pub mod commands;
 
+use std::sync::Arc;
+
 use llama_ctl_commands::snapshot::{self as cmd, App};
 use llama_ctl_core::install::InstallEnv;
+use llama_ctl_core::market::{store::resolve_market_file, DownloadManager};
 use llama_ctl_core::persist::Env;
 use llama_ctl_core::real::RealDeps;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Where settings and presets live: `%APPDATA%\llama-ctl` (ticket 00, the same
 /// convention the Python build uses), with `LLAMA_CTL_SETTINGS` /
@@ -31,6 +34,15 @@ fn install_env() -> InstallEnv {
     InstallEnv::from_process()
 }
 
+/// 下载管理器装配：market.json 启动加载（Running→Paused），进度经
+/// `EVENT_MARKET` 推全量任务列表到前端。
+fn build_market() -> commands::MarketHandle {
+    let deps = RealDeps::new();
+    let manager = Arc::new(DownloadManager::new(resolve_market_file(&env())));
+    manager.load(&deps);
+    commands::MarketHandle(manager)
+}
+
 pub fn run() {
     let deps = RealDeps::new();
     // Boot state is read before the window exists, so the first frame already
@@ -41,8 +53,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(commands::DepsHandle::new())
         .manage(commands::AppState::new(app))
+        .manage(build_market())
         .invoke_handler(commands::handlers())
         .setup(|app| {
+            // 下载进度事件：Manager 的 notify 在这里才拿得到 AppHandle。
+            {
+                let mh = app.state::<commands::MarketHandle>();
+                let h = app.handle().clone();
+                mh.0.set_notify(Arc::new(move |tasks| {
+                    let _ = h.emit(commands::EVENT_MARKET, tasks.to_vec());
+                }));
+            }
             // 材质在首帧之前对齐：Acrylic 的明暗底色跟窗口主题标志走，浅色页
             // 必须显式设浅色主题，否则罩在系统深色模式的材质上会整体发灰；
             // 关掉半透明材质时摘掉窗口特效。

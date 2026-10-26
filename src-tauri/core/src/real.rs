@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, HttpBody, RegHive};
+use crate::deps::{Deps, DepsError, DepsErrorKind, DirEntry, HttpBody, HttpStream, RegHive};
 
 /// Without this every `nssm` / `sc` / `powershell` call flashes a console
 /// window — which is why Python passed it to *every* command.
@@ -38,6 +38,21 @@ fn agent() -> &'static ureq::Agent {
             .timeout_resolve(Some(Duration::from_secs(10)))
             .timeout_recv_response(Some(Duration::from_secs(30)))
             .timeout_recv_body(Some(Duration::from_secs(30 * 60)))
+            .build();
+        ureq::Agent::new_with_config(config)
+    })
+}
+
+/// 模型下载专用 Agent（ADR-0004）：**不设** `timeout_recv_body`——它是整包
+/// 总预算，40GB / 4MB/s 要 2.7 小时，设了必被砍断。卡死的连接由上层
+/// DownloadManager 的进度看门狗兜底（无进展超时 → 取消重试）。
+fn download_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        let config = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_resolve(Some(Duration::from_secs(10)))
+            .timeout_recv_response(Some(Duration::from_secs(60)))
             .build();
         ureq::Agent::new_with_config(config)
     })
@@ -117,9 +132,42 @@ fn read_body(mut body: ureq::Body) -> Result<Vec<u8>, DepsError> {
         .read_to_vec()
         .map_err(|e| DepsError::new(DepsErrorKind::Network, format!("read body: {e}")))
 }
+
+/// 小写十六进制（SHA-256 摘要用）。
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
 impl Deps for RealDeps {
     fn spawn(&self, program: &str, args: &[&str]) -> Result<Vec<u8>, DepsError> {
         run(program, args)
+    }
+
+    fn spawn_split(&self, program: &str, args: &[&str]) -> Result<(Vec<u8>, Vec<u8>), DepsError> {
+        let mut cmd = Command::new(program);
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let out = cmd
+            .output()
+            .map_err(|e| DepsError::new(DepsErrorKind::SpawnFailed, format!("{program}: {e}")))?;
+        if !out.status.success() {
+            let stderr = crate::decode::decode(&out.stderr).trim().to_string();
+            return Err(DepsError::new(
+                DepsErrorKind::NonZeroExit,
+                if stderr.is_empty() {
+                    format!("{program} exited with {}", out.status)
+                } else {
+                    stderr
+                },
+            ));
+        }
+        Ok((out.stdout, out.stderr))
     }
 
     fn reg_read_dword(
@@ -222,6 +270,116 @@ impl Deps for RealDeps {
         let bytes = read_body(resp.into_body())?;
         let len = content_length.unwrap_or(bytes.len() as u64);
         Ok(HttpBody::new(bytes, Some(len)))
+    }
+
+    fn http_request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Vec<u8>, DepsError> {
+        let m = method.to_ascii_uppercase();
+        let resp = match m.as_str() {
+            "PUT" | "POST" => {
+                let builder = if m == "PUT" { agent().put(url) } else { agent().post(url) };
+                builder
+                    .header("User-Agent", "llama_ctl-updater/1.0")
+                    .header("Content-Type", "application/json")
+                    .send(body.unwrap_or("").as_bytes())
+            }
+            _ => agent()
+                .get(url)
+                .header("User-Agent", "llama_ctl-updater/1.0")
+                .call(),
+        }
+        .map_err(|e| DepsError::new(DepsErrorKind::Network, format!("{url}: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(DepsError::new(
+                DepsErrorKind::Network,
+                format!("{url}: HTTP {}", resp.status()),
+            ));
+        }
+        read_body(resp.into_body())
+    }
+
+    fn http_open_range(&self, url: &str, range_from: u64) -> Result<HttpStream, DepsError> {
+        let req = download_agent()
+            .get(url)
+            .header("User-Agent", "llama_ctl-updater/1.0");
+        let req = if range_from > 0 {
+            req.header("Range", format!("bytes={range_from}-"))
+        } else {
+            req
+        };
+        let resp = req
+            .call()
+            .map_err(|e| DepsError::new(DepsErrorKind::Network, format!("{url}: {e}")))?;
+        let status = resp.status().as_u16();
+        let total = match status {
+            206 => resp
+                .headers()
+                .get("content-range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|cr| cr.rsplit('/').next())
+                .and_then(|t| t.parse::<u64>().ok()),
+            200 => resp
+                .headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok()),
+            s => {
+                return Err(DepsError::new(
+                    DepsErrorKind::Network,
+                    format!("{url}: HTTP {s}"),
+                ))
+            }
+        };
+        let resumed = status == 206;
+        Ok(HttpStream {
+            reader: Box::new(resp.into_body().into_reader()),
+            total,
+            resumed,
+        })
+    }
+
+    fn append_file(&self, path: &Path, bytes: &[u8]) -> Result<(), DepsError> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| {
+                DepsError::new(DepsErrorKind::FileWrite, format!("{}: {e}", path.display()))
+            })?;
+        f.write_all(bytes).map_err(|e| {
+            DepsError::new(DepsErrorKind::FileWrite, format!("{}: {e}", path.display()))
+        })
+    }
+
+    fn file_size(&self, path: &Path) -> Result<Option<u64>, DepsError> {
+        match std::fs::metadata(path) {
+            Ok(m) => Ok(Some(m.len())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(DepsError::new(
+                DepsErrorKind::FileRead,
+                format!("{}: {e}", path.display()),
+            )),
+        }
+    }
+
+    fn hash_file(&self, path: &Path) -> Result<String, DepsError> {
+        use sha2::Digest;
+        use std::io::Read;
+        let mut f = std::fs::File::open(path).map_err(|e| {
+            DepsError::new(DepsErrorKind::FileRead, format!("{}: {e}", path.display()))
+        })?;
+        let mut hasher = sha2::Sha256::new();
+        let mut buf = vec![0u8; 1024 * 1024];
+        loop {
+            let n = f.read(&mut buf).map_err(|e| {
+                DepsError::new(DepsErrorKind::FileRead, format!("{}: {e}", path.display()))
+            })?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+        Ok(hex_encode(&hasher.finalize()))
     }
 
     fn probe_health(&self, host: &str, port: u16) -> Result<bool, DepsError> {

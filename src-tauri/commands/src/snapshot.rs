@@ -88,6 +88,10 @@ pub struct Snapshot {
     /// the caller passed them, else the parse of `AppParameters`. Returning the
     /// form is what lets `load_preset` actually fill the form.
     pub values: BTreeMap<String, String>,
+    /// 服务**当前**的参数解析结果——与 `values`（表单/预填写）分离。
+    /// 载入预设后两者不同，前端的差异计数与「应用更改」门槛都以它为准。
+    #[serde(default)]
+    pub service_values: BTreeMap<String, String>,
     /// Tokens of `AppParameters` no field claims; re-emitted verbatim.
     pub extras: Vec<String>,
     /// Parse warnings (out-of-range sliders, conflicting `-c` / `--ctx-size`).
@@ -283,6 +287,7 @@ pub fn snapshot(
 
     // What the user is editing, else what the service actually holds.
     let form = editing.cloned().unwrap_or_else(|| values.clone());
+    let service_values = values.clone();
     let dirty = match &facts {
         Some(f) => !params::semantically_equal(
             &params::build_params(&form, &extras, &fields),
@@ -317,6 +322,7 @@ pub fn snapshot(
         // looking at, and it must survive a round trip — otherwise loading a
         // preset would fill the form with the service's values instead.
         values: form,
+        service_values,
         extras,
         warnings,
         preset_loaded: app.preset_loaded.clone(),
@@ -507,6 +513,9 @@ pub fn apply(
     // Bookkeeping, never fatal: a preset that cannot be written must not make a
     // successful Apply look like a failure.
     let preset_synced = sync_preset(d, app, values).unwrap_or_default();
+    // 应用成功 = 表单内容已成为服务参数：预填写（preset_loaded）被消费，
+    // 「已载入」标记随之清除——它只表示「表单来自该预设且尚未生效」。
+    app.preset_loaded.clear();
 
     Ok(ApplyResult {
         written: true,
@@ -864,4 +873,32 @@ pub fn is_dirty(d: &impl Deps, app: &App, values: &BTreeMap<String, String>) -> 
 /// The languages the settings page offers, as `(code, code)`.
 pub fn languages() -> Vec<(String, String)> {
     Lang::ALL.map(|l| (l.code().to_string(), l.code().to_string())).to_vec()
+}
+
+/// 实测事务：服务在跑 → 停 → llama-bench → 按原状态恢复。
+/// 失败路径尽力恢复服务，绝不静默留下停摆的服务。
+pub fn bench_run(
+    d: &impl Deps,
+    app: &mut App,
+    model_path: &std::path::Path,
+    sink: &mut dyn FnMut(&str),
+) -> AppResult<llama_ctl_core::market::BenchOutcome> {
+    let service = app.selected().unwrap_or_default().to_string();
+    let was_running =
+        !service.is_empty() && svc::sc_query_state(d, &service) == svc::RUNNING_STATE;
+    if was_running {
+        sink("实测要独占显存：正在停止服务…");
+        svc::sc_action(d, "stop", &service)
+            .map_err(|e| AppError::new(AppErrorKind::Refused, format!("停止服务失败：{e}")))?;
+    }
+    let result = llama_ctl_core::market::bench::run(d, &app.install_env, model_path, sink);
+    if was_running {
+        sink("恢复服务…");
+        if let Err(e) = svc::sc_action(d, "start", &service) {
+            sink(&format!("服务恢复失败：{e}（请手动启动服务）"));
+        } else {
+            sink("服务已恢复");
+        }
+    }
+    result
 }
