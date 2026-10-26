@@ -98,6 +98,12 @@ const ok = (data) => Promise.resolve({ ok: true, data })
 const snap = () => store.snapshot.snap ?? demoSnapshot()
 
 function handle(cmd, args) {
+  // 测试注入口：failNext 让下一条同名命令按脚本失败（预检拒绝等错误路径）。
+  if (ipcDouble.failNext && ipcDouble.failNext.cmd === cmd) {
+    const f = ipcDouble.failNext
+    ipcDouble.failNext = null
+    return Promise.resolve({ ok: false, error: { kind: f.kind ?? 'MarketFailed', message: f.message } })
+  }
   switch (cmd) {
     case 'plugin:event|listen': {
       const id = args.handler

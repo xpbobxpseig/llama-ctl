@@ -1646,6 +1646,20 @@ if (updaterSrc) {
   const ask = doneRow.querySelector('.ask')
   assert.ok(ask && txt(ask).includes(COPY.enableAsk[0].slice(0, 10)), '行内确认条先问再发')
   await click([...ask.querySelectorAll('button')].at(-1), '取消确认')
+  // ④ 下单失败（磁盘预检拒绝）就地可见，不只在日志页
+  S.ipcDouble.failNext = {
+    cmd: 'market_enqueue',
+    message: '磁盘空间不足：需要 27.0GB，剩余 1.0GB（缺口 26.0GB）',
+  }
+  const variant = S.demoMarket.detail.variants[1]
+  await S.market.enqueue(variant, S.demoMarket.detail.id)
+  await flush()
+  const orderErr = q('.content .order-err')
+  assert.ok(orderErr, '下单失败在市场页就地显示红行')
+  assert.match(txt(orderErr), /磁盘空间不足/, '红行带预检拒绝的具体缺口')
+  assert.equal(S.market.orderError.value && S.ipcDouble.failNext, null, '失败注入已被消费')
+  S.market.loadList()
+  await flush()
   await click(q('.nav[data-view="params"]'), '回参数页（后续测试依赖参数页）')
   console.log('ok  市场视图：ETA / 磁盘剩余 / 完成任务行内启用')
 }

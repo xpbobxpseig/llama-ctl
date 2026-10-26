@@ -24,6 +24,7 @@ const state = reactive({
   loaded: false,
   benchBusy: '',
   applyError: '',
+  orderError: '',
 })
 
 const demo = demoMarket
@@ -48,6 +49,7 @@ export const tasks = computed(() => state.tasks)
 export const local = computed(() => state.local)
 export const benchBusy = computed(() => state.benchBusy)
 export const applyError = computed(() => state.applyError)
+export const orderError = computed(() => state.orderError)
 export const error = computed(() => state.error)
 export const loaded = computed(() => state.loaded)
 
@@ -56,6 +58,7 @@ const settingsRoot = () => snapshot.settings.value?.market_download_root || 'F:\
 export function saveHub(h) {
   state.hub = h
   state.list = [] // 切源先清空：绝不让旧源的列表看起来「没刷新」
+  state.orderError = 
   state.detail = null // 也退出详情：别让上一个源的详情盖住新源的结果
   const s = snapshot.settings.value
   if (s && ipc.isTauri()) {
@@ -126,7 +129,13 @@ export async function enqueue(variant, repoId) {
     return null
   }
   const r = await snapshot.run('market_enqueue', () => ipc.marketEnqueue(args))
-  if (r) state.tasks = r
+  if (r) {
+    state.tasks = r
+    state.orderError = '' // 下单成功清掉上一次的预检拒绝
+  } else {
+    // 磁盘预检拒绝等下单失败：就地可见（工单 36），不能只落日志页
+    state.orderError = snapshot.error || 'enqueue failed'
+  }
   return r
 }
 

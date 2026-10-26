@@ -293,6 +293,11 @@ onBeforeUnmount(() => {
 
     <!-- 下载任务 -->
     <div class="section">{{ tr('tasksSec') }}</div>
+    <!-- 下单失败就地可见（磁盘预检拒绝等）；重试成功或切源后消失 -->
+    <p v-if="market.orderError.value" class="ask order-err">
+      <span class="fit f-err">{{ tr('loadFail') }}</span>
+      <span>{{ market.orderError.value }}</span>
+    </p>
     <div v-if="!market.tasks.value.length" class="lrow meta">—</div>
     <div v-for="t in market.tasks.value" :key="t.id" class="mrow task">
       <div class="vmain">
