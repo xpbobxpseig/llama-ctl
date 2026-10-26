@@ -10,6 +10,7 @@
 import { computed, reactive, readonly } from 'vue'
 import * as ipc from '../api/ipc.js'
 import { demoMarket } from '../api/fixture.js'
+import { matchTaskToLocal } from '../design/market-fmt.js'
 import * as snapshot from './snapshot.js'
 
 const state = reactive({
@@ -256,15 +257,9 @@ export async function init() {
   }
 }
 
-/** 完成的下载任务 → 已下载条目（路径含 repo 目录且档名一致），找不到给 null。
- *  分隔符归一：Rust 的 PathBuf 给反斜杠，demo 与拼接规则给正斜杠。 */
+/** 完成的下载任务 → 已下载条目；匹配规则在 market-fmt.matchTaskToLocal（可独立测试）。 */
 export function taskToLocal(task) {
-  const seg = `/${task.repo}/`
-  return (
-    (state.local?.models ?? []).find(
-      (m) => m.label === task.label && m.path.replaceAll('\\', '/').includes(seg),
-    ) ?? null
-  )
+  return matchTaskToLocal(state.local?.models ?? [], task)
 }
 
 export const store = readonly(state)

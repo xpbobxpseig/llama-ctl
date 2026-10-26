@@ -56,6 +56,27 @@ const PKG = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json')
   console.log('ok  日志轮询自适应：1.5s 紧跟 → 静默退到 5s（降 IPC 与读盘）')
 }
 
+// ---- 市场纯逻辑模块：格式化与匹配，node 侧直接断言 --------------------------
+{
+  const fmt = await import('./src/design/market-fmt.js')
+  assert.equal(fmt.fmtBytes(639446688), '610MB', '字节格式化')
+  assert.equal(fmt.fmtBytes(null), '—', '缺失值占位')
+  assert.equal(fmt.fmtCount(430000), '43.0w', '下载量计数')
+  assert.equal(fmt.fmtEta(377), '6分17秒', 'ETA 分秒档')
+  assert.equal(fmt.fmtEta(3720), '1小时2分', 'ETA 小时档')
+  assert.equal(fmt.fmtEta(45), '45秒', 'ETA 秒档')
+  assert.equal(fmt.fmtEta(0), '', 'ETA 无效值给空串')
+  assert.equal(fmt.pct({ total: 100, received: 50 }), 50, '进度百分比')
+  assert.equal(fmt.pct({ total: 0, received: 5 }), 0, '总量未知时 0')
+  const live = { id: 'x', repo: 'r', label: 'L', state: 'running' }
+  assert.equal(fmt.taskFor([live], 'r', 'L')?.id, 'x', 'taskFor 命中活跃任务')
+  assert.equal(fmt.taskFor([{ ...live, state: 'done' }], 'r', 'L'), null, 'taskFor 忽略已完成')
+  const local = { path: 'F:\\AI\\r\\a-L.gguf', label: 'L' }
+  assert.equal(fmt.matchTaskToLocal([local], { repo: 'r', label: 'L' }), local, 'match 命中（含反斜杠归一）')
+  assert.equal(fmt.matchTaskToLocal([{ path: 'F:/AI/other/x.gguf', label: 'L' }], { repo: 'r', label: 'L' }), null, 'repo 段不匹配为 null')
+  console.log('ok  市场纯逻辑模块：fmt/eta/pct/taskFor/match 独立可测')
+}
+
 // ---- bundle the app the way `npm run build` does ----------------------------
 
 await build({
