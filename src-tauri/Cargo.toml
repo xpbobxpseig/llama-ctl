@@ -1,6 +1,6 @@
 [package]
 name = "llama-ctl"
-version = "0.1.0"
+version = "0.2.0"
 description = "llama.cpp 服务控制台 — 接管由 NSSM 管理的 llama.cpp 服务"
 edition = "2024"
 rust-version = "1.85"

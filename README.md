@@ -11,12 +11,13 @@
 
 ### 功能
 
-- 数值参数用**滑块**、枚举参数用**下拉**，每项带「?」按钮给出初学者友好的中文解释
+- 数值参数用**步进数值框**、枚举参数用**自绘下拉**（键盘 ↑↓ / Enter / Esc），每项与每个选项都带初学者友好的中文详解（悬停可见）
 - 直接读写 NSSM `AppParameters`（修掉 `-c` 与 `--ctx-size` 冲突）
 - 启停 / 重启 / 开机自启切换、`/healthz` 探活、`server.err` 日志尾随
 - 写回 / 重启均二次确认，先展示新旧参数对比
 - 「未应用更改」用**语义等价**判定：历史遗留 / 手写 / 其他工具生成的等价参数（短名、乱序、缺省默认值）不会被误报为改动
 - 参数预设（本地保存 / 加载 / 删除 / 自动备份），跨服务复用
+- **模型市场**：GGUF 模型的 发现 → 下载 → 适配评估 → 实测 → 一键启用 闭环（魔搭 ModelScope 默认 / HuggingFace 双源可切换，详见下文「模型市场」）
 - 官方 llama.cpp 更新：检查 / 下载 / 备份 / 替换 / 回滚，全程需确认
 - 启动时后台清理官方更新的陈旧下载与备份（各保留最近 3 个），无确认、不打扰
 - 动效与主题：原生「精密仪器」风浅 / 深双主题（Segoe UI Variable + 单一森林绿交互色 + 发丝线分层，见 `docs/ui-redesign-v6.md`）、按钮驻留渐隐、视图 / 弹层入场动效、动效总开关（关闭后所有动画直跳终态）
@@ -53,7 +54,8 @@ cd ..
 
 ### 更新日志
 
-- **v0.1.0（拉马管家，当前）**：桌面端从 CustomTkinter 整体重写为 **Tauri 2 + Vue 3**，落地 v6「精密仪器」设计系统（见 `docs/ui-redesign-v6.md`）；官方 llama.cpp 更新下载支持断点续传（Range）+ 重试退避 + ZIP 逐条 CRC 校验后才转正；界面骨架文案中英双语。已发布资源：[NSIS 安装包 + 绿色版 exe](https://github.com/xpbobxpseig/llama-ctl/releases/tag/v0.1.0)，SHA256 见 release 说明。
+- **v0.2.0（当前）**：新增**模型市场**视图——双源 GGUF 发现（热门榜 / 关键词搜索 / 量级筛选，魔搭默认、记住上次选择）、自研流式下载引擎（Range 断点续传 + `.part` 原子转正 + SHA256 校验、单任务队列、暂停 / 继续 / 取消、跨重启恢复、磁盘空间预检）、四档硬件适配等级（DXGI 枚举 + 物理内存检测，每档附一行依据，注明未计 KV 增长）、`llama-bench` 一键实测（pp512 / tg128 成绩存档，停服 → 测 → 按原状态恢复）、一键启用（回填 `--model` / `--mmproj` 走既有 Apply，AppParameters 唯一真源不破）、已下载管理（实测 / 启用 / 打开目录 / 删除，删除命中当前模型强警告）。设置页新增「市场」节（HF / 魔搭令牌、下载根目录）。顶栏「打开安装目录」接通（此前禁用）。规格见 `docs/spec/model-marketplace.md`，决策见 `docs/adr/0004-self-hosted-gguf-downloader.md`。
+- **v0.1.0（拉马管家）**：桌面端从 CustomTkinter 整体重写为 **Tauri 2 + Vue 3**，落地 v6「精密仪器」设计系统（见 `docs/ui-redesign-v6.md`）；官方 llama.cpp 更新下载支持断点续传（Range）+ 重试退避 + ZIP 逐条 CRC 校验后才转正；界面骨架文案中英双语。已发布资源：[NSIS 安装包 + 绿色版 exe](https://github.com/xpbobxpseig/llama-ctl/releases/tag/v0.1.0)，SHA256 见 release 说明。
 
 ### 环境变量（可选）
 
@@ -72,22 +74,36 @@ cd ..
 
 > 多数路径在运行时优先按当前服务 NSSM `AppDirectory` 推导，环境变量只作为推导失败时的回退。
 
+### 模型市场
+
+侧栏底部「市场」视图，把 GGUF 模型的获取闭环搬进管家里（发现 → 下载 → 适配评估 → 实测 → 一键启用）：
+
+- **发现**：热门榜（按下载量前 50，只收录 GGUF）+ 关键词搜索 + 「规模」下拉（全部 / ≥1B / ≥7B / ≥30B，默认 ≥1B 筛掉小模型）。双源可切换：魔搭 ModelScope（默认，国内 CDN 快 8.8×）/ HuggingFace，记住上次选择；HF gated 仓库标注「需授权」。
+- **详情**：按文件名把文件归组为量化档（主文件 / 分片组 / mmproj 投影），每档展示总体积与**四档适配等级**（流畅 = 全进显存 / 可行 = 大部分进显存（附估计 offload 比例）/ 勉强 = 主要靠内存 / 不建议），每级附一行依据（按权重估算，未计上下文对应的 KV 增长）。硬件检测走 DXGI 枚举 + 物理内存，无子进程。
+- **下载**：行内直接下单；自研流式引擎（独立于服务锁，40GB 下载期间参数页照常可用）：Range 断点续传、`.part` 原子转正、SHA256 校验（无校验和的仓库降级体积校验并明示）、失败指数退避重试、下载前磁盘空间预检、单任务队列、暂停 / 继续 / 取消、任务列表持久化（重启后从断点拉起）、失败原因就地红字显示。
+- **已下载**：扫描下载根目录（两层深，兼容子目录与平铺布局），每行含 体积 / 适配等级 / 实测成绩；操作：实测 / 启用 / 打开目录 / 删除（删除命中当前服务模型时强警告）。
+- **实测**：服务在跑时确认后 停服 → `llama-bench -o json` → 按原状态恢复，成绩（pp512 / tg128）存档展示，同一模型不同量化档谁快一目了然。
+- **一键启用**：把模型路径（含 `--mmproj`）回填到参数表单并走既有 Apply——与手填路径完全同构，AppParameters 唯一真源不破；服务在跑时询问「立即重启」。
+- **设置页「市场」节**：HuggingFace / 魔搭令牌（手填）、下载根目录（默认 `F:\AI_Model`）。
+
+> 设计与实测依据：`docs/spec/model-marketplace.md`；下载引擎选型决策：`docs/adr/0004-self-hosted-gguf-downloader.md`。
+
 ### 控件说明
 
 | 类型 | 呈现 | 字段示例 |
 |------|------|----------|
-| 滑块 | `CTkSlider` + 实时数值 | GPU 层数、上下文长度、并发槽、批大小、温度、min-p、线程 |
-| 下拉 | `CTkOptionMenu`（预设名为可编辑 `CTkComboBox`） | 投机解码、KV cache 类型、Flash Attention、监听地址 |
-| 复选 | `CTkCheckBox` | 禁用 mmap / 锁定内存 / 禁用 KV 卸载 / MoE 走 CPU |
-| 文件 | `CTkEntry` + 浏览按钮 | 模型文件、视觉投影 |
-| 文本 | `CTkEntry` | 别名、随机种子、端口 |
-| 分组 | 可折叠面板 | 模型与视觉 / 加速 / 上下文与显存 / 并发与吞吐 / 采样 / 网络 / 高级（7 组，默认展开前两组） |
+| 数值 | 步进数值框（悬停出 ± 步进，可直接键入） | GPU 层数、上下文长度、并发槽、批大小、温度、min-p、线程 |
+| 枚举 | 自绘下拉（键盘 ↑↓ / Enter / Esc / Home / End；选项悬停看详解） | 投机解码、KV cache 类型、Flash Attention、监听地址 |
+| 开关 | 双态开关（关 = 凹面发丝框，开 = 森林绿实心） | 禁用 mmap / 锁定内存 / 禁用 KV 卸载 / MoE 走 CPU |
+| 路径 | 等宽输入框（悬停看全值） | 模型文件、视觉投影 |
+| 文本 | 等宽输入框 | 别名、随机种子、端口 |
+| 分组 | 14/600 分组标题分节 | 模型与视觉 / 加速 / 上下文与显存 / 并发与吞吐 / 采样 / 网络 / 高级（7 组） |
 
-每个参数右侧有「?」按钮，点开看该参数对**性能 / 效果**的影响与适用场景；下拉项切换时会显示当前选项的解释。悬停「?」约 300ms 后提示框 200ms 淡入（快速扫过不触发）；移开后 0.8s 指数渐隐消失（离得越远越快），渐隐途中移回立即恢复；同一时刻只显示一个提示。按钮 hover 100ms 平滑到高亮并驻留，移出 0.8s 指数渐隐回常态。状态呼吸圆点在服务 RUNNING 期间脉动，用户 30s 无交互时自动静止。参数区 7 个分组可折叠，默认展开前两组，展开状态在切换语言 / 主题后保留。
+行名悬停显示对应命令行 flag，取值悬停显示完整值；每个字段与每个选项的详解都来自 Rust 侧的同源文案（与 smoke 契约锁定）。状态呼吸圆点在服务 RUNNING 期间脉动，用户 30s 无交互时自动静止。
 
 ### 设置
 
-顶部「设置」按钮打开设置页，含界面语言（参数详解保持中文）、外观（跟随系统 / 浅色 / 深色）、动效开关，以及官方更新区。动效关闭后所有动画瞬时直跳终态，功能不缺失。偏好保存于 `settings.json`（默认 `motion_enabled: true`）。
+侧栏「设置」页分四节：**界面**（界面语言（参数详解保持中文）、外观（跟随系统 / 浅色 / 深色）、动效开关）、**字体**（五档界面缩放步条 + UI / 等宽字体族选择）、**更新**（官方 llama.cpp 更新）、**模型市场**（HF / 魔搭令牌、下载根目录）。动效关闭后所有动画瞬时直跳终态，功能不缺失。偏好保存于 `settings.json`（市场令牌与下载根目录也落在这里，随设置持久化）。
 
 ### 官方更新（llama.cpp）
 
@@ -102,13 +118,12 @@ cd ..
 
 ### 参数预设
 
-把当前整套参数存为命名预设，跨服务复用。预设名是可编辑下拉框（输入与选择合一）：
+侧栏「预设」页管理，跨服务复用：
 
-- **保存**：输入新名字 → 回车或失焦，表单值写入 `presets.json`；名字已存在则不动作（避免误覆盖）
-- **载入**：下拉选已有预设 → **即选即载**入表单（不直接写回服务，需再点「应用更改」）
-- **应用同步**：写回成功后，若下拉框当前是已存在的预设名，表单值同步覆盖该预设
-- **删除**：选中预设 → 点右侧垃圾桶图标（二次确认）
-- **自动备份**：表单有未应用更改时切换预设或服务，先弹确认；确认后自动存为「自动备份 月-日 时:分:秒」
+- **保存**：分组标题行「保存为预设」→ 弹窗输入名字 → 当前表单值写入 `presets.json`
+- **载入**：列表每行「载入」→ 预设值作为表单缓冲带回（不直接写回服务，需再点「应用更改」）；当前载入的预设带标记
+- **删除**：列表行「删除」→ 弹窗二次确认
+- **自动备份**：表单有未应用更改时切换预设或服务，弹三选（另存并切换 / 放弃 / 取消）；「另存」把当前表单存为「自动备份 月-日 时:分:秒」
 
 ### 修复 / 通用化处理
 
@@ -181,12 +196,13 @@ A general-purpose Windows GUI that directly drives **any** llama.cpp service man
 
 ### Features
 
-- **Sliders** for numeric parameters and **dropdowns** for enumerated ones, each with a `?` button giving a beginner-friendly Chinese explanation
+- **Stepped numeric fields** and a **custom dropdown** for enumerated ones (keyboard ↑↓ / Enter / Esc), every field and option carrying a beginner-friendly Chinese guide (hover to read)
 - Reads and writes NSSM `AppParameters` directly (fixes the `-c` / `--ctx-size` conflict)
 - Start / stop / restart / auto-start toggle, `/healthz` liveness probe, `server.err` log tail
 - Write-back and restart both require a second confirmation, after showing an old-vs-new parameter diff
 - "Unapplied changes" uses **semantic equivalence**: equivalent parameters produced by legacy setups, hand-editing, or other tools (short names, reordering, omitted defaults) are not falsely flagged as changes
 - Parameter presets (local save / load / delete / auto-backup), reusable across services
+- **Model market**: a discover → download → fitness → benchmark → one-click-enable loop for GGUF models (ModelScope by default / HuggingFace switchable — see "Model market" below)
 - Official llama.cpp updates: check / download / back up / replace / roll back, with confirmation at every step
 - Background cleanup of stale update downloads and backups on startup (keeps the latest 3 of each), silent and non-blocking
 - Motion and theme: a native "precision instrument" light / dark theme (Segoe UI Variable, a single forest-green interaction hue, hairline layering — see `docs/ui-redesign-v6.md`), button hover fades, view / dialog entrance motion, and a global motion switch (off = every animation jumps to its end state)
@@ -223,7 +239,8 @@ cd ..
 
 ### Changelog
 
-- **v0.1.0 (current)**: the desktop app was rewritten from CustomTkinter to **Tauri 2 + Vue 3**, landing the v6 "precision instrument" design system (see `docs/ui-redesign-v6.md`); official llama.cpp downloads now resume interrupted transfers (Range) with retry/backoff and per-entry ZIP CRC validation before promotion; UI chrome is bilingual. Released assets: the [NSIS installer + portable exe](https://github.com/xpbobxpseig/llama-ctl/releases/tag/v0.1.0); SHA256 checksums are in the release notes.
+- **v0.2.0 (current)**: new **Model market** view — dual-source GGUF discovery (trending / keyword search / size filter, ModelScope by default with last choice remembered), a self-built streaming download engine (Range resume + `.part` atomic promotion + SHA256 verification, single-task queue, pause / resume / cancel, resume across restarts, disk-space precheck), four-tier hardware fitness rating (DXGI enumeration + physical memory detection, one-line rationale per tier, KV growth noted as not included), one-click `llama-bench` benchmarking (pp512 / tg128 archived; stop service → bench → restore), one-click enable (fills `--model` / `--mmproj` into the form and goes through the existing Apply — AppParameters stays the single source of truth), downloaded-model management (benchmark / enable / open folder / delete, strong warning when deleting the model in use). The Settings page gains a "Market" section (HF / ModelScope tokens, download root). The top-bar "Open install folder" button is wired up (it was permanently disabled before). Spec: `docs/spec/model-marketplace.md`; decision record: `docs/adr/0004-self-hosted-gguf-downloader.md`.
+- **v0.1.0**: the desktop app was rewritten from CustomTkinter to **Tauri 2 + Vue 3**, landing the v6 "precision instrument" design system (see `docs/ui-redesign-v6.md`); official llama.cpp downloads now resume interrupted transfers (Range) with retry/backoff and per-entry ZIP CRC validation before promotion; UI chrome is bilingual. Released assets: the [NSIS installer + portable exe](https://github.com/xpbobxpseig/llama-ctl/releases/tag/v0.1.0); SHA256 checksums are in the release notes.
 
 ### Environment variables (optional)
 
@@ -242,22 +259,36 @@ The program defaults to the author's local paths. To deploy on another machine, 
 
 > Most paths are derived from the current service's NSSM `AppDirectory` at runtime; the environment variables are only a fallback when that derivation fails.
 
+### Model market
+
+The "Market" view at the bottom of the sidebar brings the GGUF acquisition loop into the console (discover → download → fitness → benchmark → enable):
+
+- **Discover**: a trending list (top 50 by downloads, GGUF only) + keyword search + a "Size" dropdown (All / ≥1B / ≥7B / ≥30B; ≥1B by default filters out tiny models). Two switchable sources: ModelScope (default, 8.8× faster CDN in China) / HuggingFace, with the last choice remembered; HF gated repos are badged "Gated".
+- **Detail**: files are grouped into quant tiers by filename (main file / shard group / mmproj projector); each tier shows its total size and a **four-tier fitness rating** (Great = fully in VRAM / OK = mostly in VRAM (with an estimated offload ratio) / Slow = mostly system RAM / No = not recommended), each with a one-line rationale (weight-based estimate, KV growth not included). Hardware detection uses DXGI enumeration + physical memory, no subprocesses.
+- **Download**: order inline from the tier row; a self-built streaming engine (fully isolated from the service lock — the params page stays usable during a 40 GB download): Range resume, `.part` atomic promotion, SHA256 verification (repos without checksums degrade to size checks, stated explicitly), exponential-backoff retries, disk-space precheck, a single-task queue, pause / resume / cancel, a persisted task list (resumes from the breakpoint after a restart), and inline red failure reasons.
+- **Downloaded**: scans the download root (two levels deep, both subdirectory and flat layouts), each row with size / fitness / benchmark scores; actions: benchmark / enable / open folder / delete (deleting the model currently in use raises a strong warning).
+- **Benchmark**: with the service running, confirm first, then stop service → `llama-bench -o json` → restore the original state; scores (pp512 / tg128) are archived so you can compare quant tiers of the same model at a glance.
+- **One-click enable**: fills the model path (including `--mmproj`) into the parameter form and goes through the existing Apply — identical to typing the path by hand, keeping AppParameters the single source of truth; asks "restart now" when the service is running.
+- **Settings "Market" section**: HuggingFace / ModelScope tokens (manual entry), download root (default `F:\AI_Model`).
+
+> Design and measured facts: `docs/spec/model-marketplace.md`; download-engine decision: `docs/adr/0004-self-hosted-gguf-downloader.md`.
+
 ### Widgets
 
 | Kind | Renderer | Example fields |
 |------|----------|----------------|
-| Slider | `CTkSlider` + live value | GPU layers, context size, parallel slots, batch size, temperature, min-p, threads |
-| Dropdown | `CTkOptionMenu` (preset name is an editable `CTkComboBox`) | Speculative decoding, KV cache type, Flash Attention, listen address |
-| Checkbox | `CTkCheckBox` | Disable mmap / lock memory / disable KV offload / MoE on CPU |
-| File | `CTkEntry` + browse button | Model file, vision projector |
-| Text | `CTkEntry` | Alias, random seed, port |
-| Group | Collapsible panel | Model & Vision / Acceleration / Context & VRAM / Concurrency / Sampling / Network / Advanced (7 groups, first two expanded by default) |
+| Numeric | Stepped value box (hover reveals ± steppers; type directly) | GPU layers, context size, parallel slots, batch size, temperature, min-p, threads |
+| Enum | Custom dropdown (keyboard ↑↓ / Enter / Esc / Home / End; hover an option for its guide) | Speculative decoding, KV cache type, Flash Attention, listen address |
+| Switch | Two-state toggle (off = inset hairline, on = solid forest green) | Disable mmap / lock memory / disable KV offload / MoE on CPU |
+| Path | Monospace input (hover for the full value) | Model file, vision projector |
+| Text | Monospace input | Alias, random seed, port |
+| Group | 14/600 section headings | Model & Vision / Acceleration / Context & VRAM / Concurrency / Sampling / Network / Advanced (7 groups) |
 
-Every parameter has a `?` button explaining its impact on **performance / quality** and when to use it; switching a dropdown option shows the explanation for the current choice. Hovering `?` for ~300ms fades the tooltip in over 200ms (a quick pass does not trigger it); moving away fades it out over 0.8s exponentially (faster the further away), and moving back during the fade restores it immediately. Only one tooltip shows at a time. Buttons ease to their highlight in 100ms and hold it, fading back over 0.8s after the pointer leaves. The breathing status dot pulses while the service is RUNNING and freezes after 30s without interaction. The 7 parameter groups collapse independently; expansion state survives language / theme changes.
+Hovering a row name shows the command-line flag; hovering a value shows the full text. Every field's and every option's guide comes from the same source text as the Rust side (locked by the smoke contract). The breathing status dot pulses while the service is RUNNING and freezes after 30s without interaction.
 
 ### Settings
 
-The top-bar "Settings" button opens a page with UI language (parameter guides stay Chinese), appearance (follow system / light / dark), the motion switch, and the official-update section. With motion off, all animations jump straight to their end state without losing any functionality. Preferences are stored in `settings.json` (default `motion_enabled: true`).
+The "Settings" page in the sidebar has four sections: **Interface** (UI language (parameter guides stay Chinese), appearance (follow system / light / dark), the motion switch), **Fonts** (a 5-stop UI-scale stepper + UI / monospace family pickers), **Updates** (official llama.cpp updates), and **Model market** (HF / ModelScope tokens, download root). With motion off, all animations jump straight to their end state without losing any functionality. Preferences are stored in `settings.json` (market tokens and the download root persist there too).
 
 ### Official updates (llama.cpp)
 
@@ -272,13 +303,12 @@ The Settings page's "Official updates" section syncs the latest builds from [`gg
 
 ### Presets
 
-Save the current parameter set as a named preset and reuse it across services. The preset name is an editable dropdown (input and selection in one):
+Managed on the "Presets" page in the sidebar, reusable across services:
 
-- **Save**: type a new name → press Enter or blur; the form's values are written to `presets.json`. An existing name is a no-op (avoids accidental overwrite).
-- **Load**: pick an existing preset → values load into the form immediately (they are **not** written back to the service; click "Apply changes" for that).
-- **Apply sync**: after a successful write-back, if the dropdown currently holds an existing preset name, the form values overwrite that preset.
-- **Delete**: select a preset → click the trash icon on the right (second confirmation).
-- **Auto-backup**: switching preset or service with unapplied changes asks for confirmation first, then saves the current form as "Auto backup MM-DD HH:MM:SS".
+- **Save**: the "Save as preset" button in the section heading → type a name in the dialog → the form's values are written to `presets.json`.
+- **Load**: "Load" on any list row → the preset's values land in the form buffer (they are **not** written back to the service; click "Apply changes" for that). The currently loaded preset is marked.
+- **Delete**: "Delete" on a list row → a confirmation dialog.
+- **Auto-backup**: switching preset or service with unapplied changes offers three choices (back up & switch / discard / cancel); "back up" saves the current form as "Auto backup MM-DD HH:MM:SS".
 
 ### Fixes / generalization
 

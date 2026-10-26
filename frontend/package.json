@@ -1,7 +1,7 @@
 {
   "name": "llama-ctl-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "llama.cpp 服务控制台 — Vue 3 + NaiveUI shell (ticket 12)",
   "scripts": {

@@ -14,14 +14,15 @@ import * as store from '../stores/snapshot.js'
 import * as update from '../stores/update.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { t } from './copy.js'
+import pkg from '../../package.json'
 
 const emit = defineEmits(['license', 'params', 'check-updates'])
 
 const lang = computed(() => store.lang.value)
 const tr = (key, fields) => t(key, lang.value, fields)
 
-/** 与 frontend/package.json 的 version 同步。 */
-const VERSION = '0.1.0'
+/** 版本单源：frontend/package.json（改版只动一处）。 */
+const VERSION = pkg.version
 
 const llamaBuild = computed(() => {
   if (update.installed.value !== null && update.installed.value !== undefined) {
